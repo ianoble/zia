@@ -26,10 +26,11 @@ import {
 	unexploredEdges,
 } from './board';
 import { canPlaceOutfit, cellKey, hullCells, occupancy, placedCells } from './holdGeometry';
-import { createShipState, isDestroyed, shipDef } from './ship';
+import { applyDamage, createShipState, damageTargets, shipDef, totalDamage } from './ship';
 import {
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
+	type DamageKind,
 	type PlacedOutfit,
 	type Rotation,
 	type ShipState,
@@ -96,6 +97,7 @@ export function createInitialState(
 			initiativeRoll: rolls[id],
 			outfittingDone: false,
 			explorationTokens: [],
+			pendingDamage: [],
 		};
 	});
 
@@ -200,26 +202,20 @@ function placeExplorationTokens(G: ZiaState, sectorIndex: number) {
 }
 
 /**
- * Put 1 ice damage in the hold: an empty space if there is one, else under an outfit.
- * TODO: the captain chooses where it goes, and a shield can block it.
+ * A ship takes damage: it waits for its captain to place it in the hold. If that much
+ * damage would fill the hold, the ship is destroyed straight away (where it goes can't
+ * change that). Returns true if the ship was destroyed.
+ * TODO: shields can block damage (not respawn damage).
  */
-function addIceDamage(ship: ShipState) {
-	const hit = new Set([...ship.damage, ...ship.iceDamage]);
-	const cargo = new Set(ship.cargo.map((c) => c.cell));
-	const occupied = occupancy(ship.outfits);
-	const free = [...hullCells(shipDef(ship))].filter((k) => !hit.has(k));
-	const cell = free.find((k) => !occupied.has(k) && !cargo.has(k)) ?? free.find((k) => !cargo.has(k)) ?? free[0];
-	if (!cell) return;
-	ship.iceDamage.push(cell);
-	ship.cargo = ship.cargo.filter((c) => c.cell !== cell);
-	// A marker on a damaged use space is disarmed.
-	for (const o of ship.outfits) {
-		const use = placedCells(o).find((c) => c.kind === 'U' && cellKey(c.x, c.y) === cell);
-		if (use && o.usedSpaces.includes(use.useIndex)) {
-			o.usedSpaces = o.usedSpaces.filter((u) => u !== use.useIndex);
-			ship.disarmedMarkers++;
-		}
+function takeDamage(G: ZiaState, seat: string, kind: DamageKind, count: number, reason: string): boolean {
+	const p = G.players[seat];
+	const ship = p.ship!;
+	for (let i = 0; i < count; i++) p.pendingDamage.push(kind);
+	if (totalDamage(ship) + p.pendingDamage.length >= shipDef(ship).holdSize) {
+		destroyShip(G, seat, reason);
+		return true;
 	}
+	return false;
 }
 
 /** Put a cargo cube in an empty hold space; returns false (jettisoned) if there's no room. */
@@ -254,7 +250,7 @@ function collectExplorationToken(G: ZiaState, seat: string, hex: string, random:
 	} else if (token === 'energy') {
 		ship.energy = shipDef(ship).energy;
 	} else if (token === 'ice-damage') {
-		addIceDamage(ship);
+		text += ' (place it in your hold)';
 	} else if (token === 'captain-in-need') {
 		text += ' (missions come later)';
 	} else {
@@ -263,10 +259,7 @@ function collectExplorationToken(G: ZiaState, seat: string, hex: string, random:
 	}
 	log(G, seat, text);
 
-	if (isDestroyed(ship)) {
-		destroyShip(G, seat, 'ice damage filled the hold');
-		return true;
-	}
+	if (token === 'ice-damage' && takeDamage(G, seat, 'ice', 1, 'ice damage filled the hold')) return true;
 	if (pairableTokens(p.explorationTokens).length >= 2) G.turn.explorationPairPending = true;
 	return false;
 }
@@ -289,6 +282,7 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 	const p = G.players[seat];
 	p.position = null;
 	p.bounty = 0;
+	p.pendingDamage = [];
 	if (p.ship) p.ship.cargo = [];
 	G.turn.movement = 0;
 	log(G, seat, `was destroyed: ${reason}`);
@@ -324,6 +318,8 @@ function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 		p.fame++;
 		log(G, seat, 'rolled a natural 20: +1 fame for Luck');
 	}
+	// Embers: respawned ships take unblockable damage equal to their tier, placed by the captain.
+	takeDamage(G, seat, 'damage', shipDef(ship).tier, 'respawn damage filled the hold');
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +330,11 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (playerID !== currentPlayer) return 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
-	if (G.turn.explorationPairPending && moveName !== 'claimExplorationPair') {
+	// Damage to place and exploration pairs to cash in come before anything else.
+	if (p.pendingDamage?.length && moveName !== 'placeDamage' && moveName !== 'claimExplorationPair') {
+		return 'First place your damage: click a space in your hold';
+	}
+	if (G.turn.explorationPairPending && moveName !== 'claimExplorationPair' && moveName !== 'placeDamage') {
 		return 'First choose 1 fame or 2,000 credits for your two exploration tokens';
 	}
 
@@ -428,6 +428,10 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			}
 			return true;
 		}
+
+		case 'placeDamage':
+			if (!p.ship || !p.pendingDamage?.length) return 'No damage to place';
+			return damageTargets(p.ship).includes(args[0] as string) ? true : 'That space already has damage';
 
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
@@ -536,6 +540,14 @@ const moves = {
 				return;
 			}
 		}
+	}),
+
+	/** Place one pending damage on a hold space or outfit section of the captain's choice. */
+	placeDamage: guarded('placeDamage', ({ G, playerID }, cell: string) => {
+		const p = G.players[playerID];
+		const kind = p.pendingDamage.shift()!;
+		const cube = applyDamage(p.ship!, kind, cell);
+		log(G, playerID, `placed ${kind === 'ice' ? 'ice damage' : 'damage'} in their hold${cube ? ` (a ${cube} cube was jettisoned)` : ''}`);
 	}),
 
 	/** Two face-up exploration tokens: discard both for 1 fame or 2,000 credits. */

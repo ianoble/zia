@@ -4,6 +4,7 @@ import { useGame, useTurnNotifications, loadSession } from '@engine/client';
 import { gameDef, reachableHexes, unexploredEdges } from '../logic/index';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
+import { damageTargets } from '../logic/ship';
 import { useMatchPlayers } from '../composables/useMatchPlayers';
 import { useBotPlayers } from '../composables/useBotPlayers';
 import BoardMap, { type BoardShip } from '../components/board/BoardMap.vue';
@@ -112,6 +113,21 @@ watch(
 	(id) => (viewedSeat.value = id),
 );
 const viewedShip = computed(() => G.value?.players[viewedSeat.value]?.ship ?? null);
+
+/** My damage waiting to be placed: highlight where it can go on my ship mat. */
+const myPendingDamage = computed(() => G.value?.players[props.playerID]?.pendingDamage ?? []);
+const damageTargetCells = computed(() => {
+	const ship = G.value?.players[props.playerID]?.ship;
+	return myPendingDamage.value.length && ship && viewedSeat.value === props.playerID ? damageTargets(ship) : null;
+});
+// Show my ship when I have damage to place.
+watch(
+	() => myPendingDamage.value.length,
+	(n) => n && (viewedSeat.value = props.playerID),
+);
+function onHoldClick(cell: string) {
+	if (damageTargetCells.value?.includes(cell)) move('placeDamage', cell);
+}
 const captainsWithShips = computed(() => Object.values(G.value?.players ?? {}).filter((p) => p.ship));
 
 const orderedSeats = computed(() => {
@@ -211,7 +227,10 @@ onUnmounted(() => disconnect());
 							:bounty="G.players[viewedSeat].bounty"
 							:captain-name="nameOf(viewedSeat)"
 							:can-impulse="viewedSeat === playerID && isMyTurn && viewedShip.impulseReady"
+							:interactive="!!damageTargetCells"
+							:targets="damageTargetCells"
 							@impulse="act('useImpulse')"
+							@cell-click="onHoldClick"
 						/>
 					</div>
 				</section>

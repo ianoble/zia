@@ -23,6 +23,8 @@ const props = defineProps<{
 	margin?: number;
 	/** Outfit to highlight (selected for moving/returning). */
 	selectedUid?: string | null;
+	/** Cells to highlight as click targets (e.g. where damage can go). */
+	targets?: string[] | null;
 }>();
 const emit = defineEmits<{ cellClick: [key: string]; cellHover: [key: string | null] }>();
 
@@ -106,6 +108,7 @@ const hullList = computed(() =>
 const occupiedKeys = computed(() => new Set(outfitCells.value.map((c) => cellKey(c.x, c.y))));
 const damageSet = computed(() => new Set(props.state.damage));
 const iceSet = computed(() => new Set(props.state.iceDamage));
+const targetSet = computed(() => new Set(props.targets ?? []));
 const cargoAt = computed(() => new Map(props.state.cargo.map((c) => [c.cell, c.color])));
 
 /** Every cell that can show a token: hull cells plus exterior outfit sections. */
@@ -184,6 +187,7 @@ function onClick(key: string) {
 			:key="`t${t.key}`"
 			type="button"
 			class="token-cell"
+			:class="{ target: targetSet.has(t.key) }"
 			:style="pos(t.x, t.y)"
 			:tabindex="interactive ? 0 : -1"
 			:aria-label="`Hold space ${t.key}`"
@@ -222,6 +226,16 @@ function onClick(key: string) {
 }
 .hull-cell {
 	padding: 3px;
+}
+.token-cell.target {
+	z-index: 5;
+	border-radius: 6px;
+	outline: 3px dashed #f87171;
+	outline-offset: -4px;
+	cursor: pointer;
+}
+.token-cell.target:hover {
+	background: #ef444455;
 }
 .hull-cell::before {
 	content: '';

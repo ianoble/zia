@@ -1,5 +1,6 @@
 import { SHIPS_BY_ID, type ShipDef } from '../data/ships';
-import { MARKERS_PER_SHIP, type ShipState } from './types';
+import { cellKey, hullCells, placedCells } from './holdGeometry';
+import { MARKERS_PER_SHIP, type DamageKind, type ShipState } from './types';
 
 /** A freshly launched ship: full energy, all markers armed, impulse ready, empty hold. */
 export function createShipState(shipId: string, abilityIndex = 0): ShipState {
@@ -36,6 +37,35 @@ export function totalDamage(state: ShipState): number {
 
 export function isDestroyed(state: ShipState): boolean {
 	return totalDamage(state) >= shipDef(state).holdSize;
+}
+
+/**
+ * Where damage can go (rulebook p14): any hold space or outfit/mod section (exterior
+ * sections included) without damage on it yet.
+ */
+export function damageTargets(state: ShipState): string[] {
+	const keys = new Set(hullCells(shipDef(state)));
+	for (const o of state.outfits) for (const c of placedCells(o)) keys.add(cellKey(c.x, c.y));
+	const hit = new Set([...state.damage, ...state.iceDamage]);
+	return [...keys].filter((k) => !hit.has(k));
+}
+
+/**
+ * Put one damage on `cell`: a cargo cube there is jettisoned, and a marker on a use
+ * space there moves to the Disarmed area. Returns the jettisoned cube's colour, if any.
+ */
+export function applyDamage(state: ShipState, kind: DamageKind, cell: string): string | null {
+	(kind === 'ice' ? state.iceDamage : state.damage).push(cell);
+	const cube = state.cargo.find((c) => c.cell === cell);
+	state.cargo = state.cargo.filter((c) => c.cell !== cell);
+	for (const o of state.outfits) {
+		const use = placedCells(o).find((c) => c.kind === 'U' && cellKey(c.x, c.y) === cell);
+		if (use && o.usedSpaces.includes(use.useIndex)) {
+			o.usedSpaces = o.usedSpaces.filter((u) => u !== use.useIndex);
+			state.disarmedMarkers++;
+		}
+	}
+	return cube?.color ?? null;
 }
 
 /** Stranded: no energy and no armed markers (rulebook p4). */

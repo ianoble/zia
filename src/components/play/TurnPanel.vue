@@ -33,6 +33,7 @@ const scanSides = computed(() => {
 		.map((e) => ({ slot: e.slot, name: SLOT_NAMES[e.slot], symbol: edgeSymbolFacing(props.G.board.sectors[e.sectorIndex].rotation, e.slot) }));
 });
 const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
+const pendingDamage = computed(() => props.G.players[props.playerID]?.pendingDamage ?? []);
 const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
 
@@ -48,6 +49,16 @@ watch(
 <template>
 	<div v-if="!myTurn" class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-300">
 		Waiting for <strong>{{ nameOf(currentPlayer) }}</strong> to take their turn.
+	</div>
+
+	<div v-else-if="ship && def && pendingDamage.length" class="space-y-2 rounded-lg border border-red-800/70 bg-slate-900/70 p-3 text-sm">
+		<p class="font-semibold text-red-200">
+			Place {{ pendingDamage.length }} {{ pendingDamage[0] === 'ice' ? 'ice damage' : 'damage' }}{{ pendingDamage.length > 1 ? ' markers' : '' }}
+		</p>
+		<p class="text-xs text-slate-400">
+			Click a highlighted space in your hold. Damage on a cargo cube jettisons it; damage on a use space with a marker sends the marker to
+			Disarmed.
+		</p>
 	</div>
 
 	<div v-else-if="ship && def && pairPending" class="space-y-3 rounded-lg border border-fuchsia-800/70 bg-slate-900/70 p-3 text-sm">

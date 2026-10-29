@@ -7,6 +7,8 @@ import { boardHexes, movePath, startingBoard, startingSpawnFor } from './board';
 import { EMBERS_EXPLORATION_TOKENS, type ExplorationToken } from '../data/exploration';
 import { SECTORS_BY_ID } from '../data/sectors';
 import { SHIPS_BY_ID } from '../data/ships';
+import { applyDamage, createShipState, damageTargets } from './ship';
+import { placedCells, cellKey } from './holdGeometry';
 
 const up = (key: string, n = 1) => {
 	const [q, r] = key.split(',').map(Number);
@@ -79,11 +81,19 @@ describe('collecting exploration tokens', () => {
 		expect(c.G().explorationPool).toEqual([]);
 	});
 
-	it('ice damage goes in the hold', () => {
+	it('ice damage waits for the captain to place it', () => {
 		const c = playClient(['ice-damage']);
 		c.act('useImpulse');
 		c.act('moveShip', up(c.spawn));
-		expect(c.G().players[c.seat].ship!.iceDamage).toHaveLength(1);
+		const me = () => c.G().players[c.seat];
+		expect(me().pendingDamage).toEqual(['ice']);
+		expect(me().ship!.iceDamage).toHaveLength(0);
+		expect(c.act('endTurn', 0)).toBe(false); // must place it first
+		const cell = damageTargets(me().ship!)[0];
+		expect(c.act('placeDamage', cell)).toBe(true);
+		expect(me().ship!.iceDamage).toEqual([cell]);
+		expect(me().pendingDamage).toEqual([]);
+		expect(c.act('placeDamage', cell)).toBe(false); // nothing left to place
 	});
 
 	it('two face-up tokens must be cashed in for fame or credits before anything else', () => {
@@ -146,5 +156,34 @@ describe('move routes', () => {
 		const to = `${q + 1},${r - 2}`;
 		expect(movePath(board, spawn, to, 5, new Set([`${q},${r - 1}`]))).toEqual([`${q},${r - 1}`, to]);
 		expect(movePath(board, spawn, to, 5, new Set([`${q + 1},${r - 1}`]))).toEqual([`${q + 1},${r - 1}`, to]);
+	});
+});
+
+describe('placing damage', () => {
+	it('can go on any undamaged hold space or outfit section', () => {
+		const ship = createShipState('easy-tiger');
+		const all = damageTargets(ship);
+		expect(all).toHaveLength(SHIPS_BY_ID['easy-tiger'].holdSize);
+		applyDamage(ship, 'damage', all[0]);
+		expect(damageTargets(ship)).not.toContain(all[0]);
+	});
+
+	it('jettisons a cargo cube on that space', () => {
+		const ship = createShipState('easy-tiger');
+		const cell = damageTargets(ship)[0];
+		ship.cargo.push({ cell, color: 'holo' });
+		expect(applyDamage(ship, 'ice', cell)).toBe('holo');
+		expect(ship.cargo).toEqual([]);
+		expect(ship.iceDamage).toEqual([cell]);
+	});
+
+	it('moves a marker on a damaged use space to Disarmed', () => {
+		const ship = createShipState('easy-tiger');
+		ship.outfits.push({ uid: 'o1', outfitId: 'engine-d6', x: 0, y: 0, rotation: 0, flipped: false, usedSpaces: [0] });
+		ship.armedMarkers--;
+		const use = placedCells(ship.outfits[0]).find((c) => c.kind === 'U' && c.useIndex === 0)!;
+		applyDamage(ship, 'damage', cellKey(use.x, use.y));
+		expect(ship.outfits[0].usedSpaces).toEqual([]);
+		expect(ship.disarmedMarkers).toBe(1);
 	});
 });

@@ -41,6 +41,9 @@ export interface PlacedOutfit {
 	usedSpaces: number[];
 }
 
+/** Normal damage or [Embers] ice damage. */
+export type DamageKind = 'damage' | 'ice';
+
 export interface CargoInHold {
 	/** Cell key "x,y". */
 	cell: string;
@@ -83,6 +86,8 @@ export interface ZiaPlayer {
 	outfittingDone: boolean;
 	/** Face-up exploration tokens on the ship mat. */
 	explorationTokens: ExplorationToken[];
+	/** Damage taken but not yet placed in the hold; the captain places each one before doing anything else. */
+	pendingDamage: DamageKind[];
 }
 
 export interface ZiaSetupData {

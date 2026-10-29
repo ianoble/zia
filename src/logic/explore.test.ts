@@ -157,6 +157,8 @@ describe('Blind Jump', () => {
 		expect(spawnPoints(c.G().board).map((p) => p.key)).toContain(me.position);
 		expect(me.ship!.energy).toBe(SHIPS_BY_ID['easy-tiger'].energy);
 		expect(me.ship!.impulseReady).toBe(true);
+		// Embers: respawn damage equal to the ship's tier, placed by the captain.
+		expect(me.pendingDamage).toEqual(Array(SHIPS_BY_ID['easy-tiger'].tier).fill('damage'));
 	});
 });
 

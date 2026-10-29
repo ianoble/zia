@@ -85,7 +85,7 @@ describe('setup walkthrough and a first turn', () => {
 		expect(act('useImpulse')).toBe(false); // once per turn
 		const from = G().players[second].position!;
 		const [q, r] = from.split(',').map(Number);
-		const target = `${q},${r + 2}`;
+		const target = `${q},${r - 2}`; // away from the exploration token below the spawn point
 		expect(act('moveShip', target)).toBe(true);
 		expect(G().players[second].position).toBe(target);
 		expect(G().turn.movement).toBe(1);
