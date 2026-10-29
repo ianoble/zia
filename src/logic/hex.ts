@@ -79,9 +79,17 @@ export function hexCorners(x: number, y: number, size: number): { x: number; y: 
 export const SECTOR_RADIUS = 2;
 
 /**
- * Offsets from one sector's centre hex to each of its six neighbouring sectors' centres.
- * Radius-2 hexagons tile the plane with centres 5 apart, e.g. (q 5, r -2).
+ * Offsets from one sector's centre hex to each of its six neighbouring sectors' centres,
+ * clockwise from E (slightly above horizontal on screen).
+ * Radius-2 hexagons can tile with centres at (5, -2) or its mirror image (5, -3). The
+ * printed tiles use (5, -3): it's the only way the edge symbols in the middle of each
+ * side land on the same hex edge as the neighbouring tile's symbol.
  */
-export const SECTOR_NEIGHBOR_OFFSETS: Axial[] = Array.from({ length: 6 }, (_, i) => rotateHex({ q: 5, r: -2 }, i));
+export const SECTOR_NEIGHBOR_OFFSETS: Axial[] = Array.from({ length: 6 }, (_, i) => rotateHex({ q: 5, r: -3 }, i));
+
+/** Which neighbour slot (index into SECTOR_NEIGHBOR_OFFSETS) of the sector at `center` contains `hex`, or -1. */
+export function sectorSlotOf(center: Axial, hex: Axial): number {
+	return SECTOR_NEIGHBOR_OFFSETS.findIndex((off) => hexDistance(addHex(center, off), hex) <= SECTOR_RADIUS);
+}
 
 export const sectorHexes = (center: Axial): Axial[] => hexesInRange(center, SECTOR_RADIUS);

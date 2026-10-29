@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { hexDistance, hexKey, hexToPixel, rotateHex, SECTOR_NEIGHBOR_OFFSETS, sectorHexes } from './hex';
-import { boardHexes, matchedRotation, movementCosts, reachableHexes, SECTOR_SLOT, startingBoard, startingSpawnFor } from './board';
+import { addHex, HEX_DIRECTIONS, hexDistance, hexKey, hexToPixel, rotateHex, SECTOR_NEIGHBOR_OFFSETS, sectorHexes, sectorSlotOf } from './hex';
+import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS } from '../data/sectors';
+import {
+	boardHexes,
+	edgeSymbolFacing,
+	edgeSymbolMarks,
+	explorePlacement,
+	matchedRotation,
+	movementCosts,
+	reachableHexes,
+	SECTOR_SLOT,
+	slotCrossed,
+	startingBoard,
+	startingSpawnFor,
+	type BoardState,
+} from './board';
 
 describe('hex maths', () => {
 	it('a sector has 19 hexes', () => {
@@ -68,10 +82,11 @@ describe('board', () => {
 			const p = hexToPixel(SECTOR_NEIGHBOR_OFFSETS[i], 1);
 			return ((Math.atan2(p.y, p.x) * 180) / Math.PI + 360) % 360;
 		};
-		expect(angle(SECTOR_SLOT.E)).toBeLessThan(15);
-		expect(angle(SECTOR_SLOT.W)).toBeCloseTo(186.6, 0);
-		expect(angle(SECTOR_SLOT.NE)).toBeGreaterThan(270);
-		expect(angle(SECTOR_SLOT.SE)).toBeLessThan(90);
+		// Matches the printed tile: E is slightly above horizontal, then every 60° clockwise.
+		expect(angle(SECTOR_SLOT.E)).toBeCloseTo(353.4, 0);
+		expect(angle(SECTOR_SLOT.SE)).toBeCloseTo(53.4, 0);
+		expect(angle(SECTOR_SLOT.W)).toBeCloseTo(173.4, 0);
+		expect(angle(SECTOR_SLOT.NE)).toBeCloseTo(293.4, 0);
 	});
 
 	it('each captain has their own spawn point, none on Nyr', () => {
@@ -95,16 +110,83 @@ describe('board', () => {
 
 	it('movement crosses from a starting sector into Nyr', () => {
 		const board = startingBoard(['0', '1']);
-		const spawn = startingSpawnFor(board, '1')!; // seat 1 starts east of Nyr, centre (5,-2)
-		expect(spawn).toBe('5,-2');
+		const spawn = startingSpawnFor(board, '1')!; // seat 1 starts east of Nyr, centre (5,-3)
+		expect(spawn).toBe('5,-3');
 		const costs = movementCosts(board, spawn, 5);
 		expect(costs.get('2,-1')).toBe(3);
 	});
 
 	it('cannot end on an occupied hex but can pass through', () => {
 		const board = startingBoard(['0', '1']);
-		const r = reachableHexes(board, '5,-2', 2, new Set(['4,-2']));
-		expect(r.has('4,-2')).toBe(false);
-		expect(r.get('3,-2')).toBe(2);
+		const r = reachableHexes(board, '5,-3', 2, new Set(['4,-3']));
+		expect(r.has('4,-3')).toBe(false);
+		expect(r.get('3,-3')).toBe(2);
+	});
+});
+
+describe('edge symbols', () => {
+	const sameEdge = (a: { hex: { q: number; r: number }; direction: number }, b: typeof a) =>
+		hexKey(addHex(a.hex, HEX_DIRECTIONS[a.direction])) === hexKey(b.hex) && (a.direction + 3) % 6 === b.direction;
+
+	it('six different symbols per tile', () => {
+		expect(new Set(EDGE_SYMBOLS).size).toBe(6);
+	});
+
+	it('each symbol sits on the middle edge of its side', () => {
+		for (let slot = 0; slot < 6; slot++) {
+			const hex = rotateHex(EDGE_SYMBOL_ANCHOR.hex, slot);
+			const across = addHex(hex, HEX_DIRECTIONS[(EDGE_SYMBOL_ANCHOR.direction + slot) % 6]);
+			expect(sectorSlotOf({ q: 0, r: 0 }, across)).toBe(slot);
+			// Middle of the side: the edge lies on the line between the two sector centres.
+			const mid = hexToPixel(SECTOR_NEIGHBOR_OFFSETS[slot], 1);
+			const a = hexToPixel(hex, 1);
+			const b = hexToPixel(across, 1);
+			const cross = (a.x + b.x) / 2 * mid.y - (a.y + b.y) / 2 * mid.x;
+			expect(Math.abs(cross)).toBeLessThan(1e-9);
+		}
+	});
+
+	it("starting sectors' symbols meet Nyr's on the same edge, and match", () => {
+		const board = startingBoard(['0', '1', '2', '3', '4']);
+		const marks = edgeSymbolMarks(board);
+		for (let i = 1; i < board.sectors.length; i++) {
+			const mine = marks.find((m) => m.sectorIndex === i && sectorSlotOf(board.sectors[i].center, { q: 0, r: 0 }) === m.slot)!;
+			const nyr = marks.find((m) => m.sectorIndex === 0 && m.slot === (mine.slot + 3) % 6)!;
+			expect(mine.symbol).toBe(nyr.symbol);
+			expect(sameEdge(mine, nyr)).toBe(true);
+		}
+	});
+
+	it.each([0, 1, 2, 3, 4, 5])('exploring from a tile turned %i matches the symbol on every side', (rotation) => {
+		const board: BoardState = { sectors: [{ tileId: 'blank-1', center: { q: 0, r: 0 }, rotation }] };
+		for (let slot = 0; slot < 6; slot++) {
+			const placed = explorePlacement(board, 0, slot)!;
+			expect(placed.center).toEqual(SECTOR_NEIGHBOR_OFFSETS[slot]);
+			expect(placed.rotation).toBe(matchedRotation(rotation));
+			expect(edgeSymbolFacing(placed.rotation, (slot + 3) % 6)).toBe(edgeSymbolFacing(rotation, slot));
+			const marks = edgeSymbolMarks({ sectors: [...board.sectors, { tileId: 'blank-2', ...placed }] });
+			const a = marks.find((m) => m.sectorIndex === 0 && m.slot === slot)!;
+			const b = marks.find((m) => m.sectorIndex === 1 && m.slot === (slot + 3) % 6)!;
+			expect(sameEdge(a, b)).toBe(true);
+		}
+	});
+
+	it("can't explore where a sector already is", () => {
+		const board = startingBoard(['0', '1']);
+		expect(explorePlacement(board, 0, SECTOR_SLOT.E)).toBeNull();
+		expect(explorePlacement(board, 0, SECTOR_SLOT.NE)).not.toBeNull();
+	});
+
+	it('finds the side a step crosses', () => {
+		const board = startingBoard(['0', '1']);
+		// From Nyr's east orbit hex into the east starting sector.
+		expect(slotCrossed(board, '2,-1', '3,-2')).toEqual({ sectorIndex: 0, slot: SECTOR_SLOT.E });
+		expect(slotCrossed(board, '2,-1', '2,0')).toBeNull();
+		// Off the board to the north-east of the east starting sector.
+		const ne = addHex(board.sectors[2].center, { q: 1, r: -3 });
+		expect(slotCrossed(board, hexKey(addHex(board.sectors[2].center, { q: 1, r: -2 })), hexKey(ne))).toEqual({
+			sectorIndex: 2,
+			slot: SECTOR_SLOT.NE,
+		});
 	});
 });

@@ -2,12 +2,33 @@
  * Sector tile catalog. Each tile is 19 hexes (radius 2), addressed by local axial
  * coordinates relative to the tile's centre hex.
  *
- * Only blank placeholder tiles exist for now; real tiles (planets, borders, edge
- * symbols, exploration spaces, mission points) will be added once the tile data arrives.
+ * Only blank placeholder tiles exist for now; real tiles (planets, borders,
+ * exploration spaces, mission points) will be added once the tile data arrives.
+ * Edge symbols are the same on every tile, so they live in EDGE_SYMBOLS below.
  */
 import type { Axial } from '../logic/hex';
 
 export type SpaceKind = 'spawn' | 'star';
+
+/**
+ * Edge symbols printed in the middle of each side of a sector tile. Each is a short
+ * line crossing the tile edge with a shape on its inner end ('line' has no shape).
+ */
+export type EdgeSymbol = 'bar' | 'square' | 'circle' | 'arrow' | 'cup' | 'line';
+
+/**
+ * The symbol on each side of an unrotated tile, clockwise from E (same order as
+ * SECTOR_NEIGHBOR_OFFSETS / SECTOR_SLOT): E bar, SE square, SW circle, W arrow, NW cup,
+ * NE line. Every tile, Nyr included, has these symbols in this order.
+ */
+export const EDGE_SYMBOLS: readonly EdgeSymbol[] = ['bar', 'square', 'circle', 'arrow', 'cup', 'line'];
+
+/**
+ * Where the E-side symbol sits on an unrotated tile: on the up-right edge (HEX_DIRECTIONS
+ * index 5) of local hex (2, -1), the middle of the five hex edges on that side. Other
+ * sides are this turned by 60° per slot.
+ */
+export const EDGE_SYMBOL_ANCHOR = { hex: { q: 2, r: -1 } as Axial, direction: 5 };
 
 export interface SectorSpace {
 	at: Axial;

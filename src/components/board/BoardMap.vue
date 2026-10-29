@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { SECTORS_BY_ID } from '../../data/sectors';
-import { boardHexes, type BoardState } from '../../logic/board';
+import { boardHexes, edgeSymbolMarks, type BoardState } from '../../logic/board';
 import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex } from '../../logic/hex';
 
 /**
@@ -81,6 +81,20 @@ const starCenters = computed(() => {
 		(h) => h.kind === 'star' && HEX_DIRECTIONS.every((d) => all.get(hexKey(addHex(h.hex, d)))?.kind === 'star'),
 	);
 });
+
+/**
+ * Edge symbols, one in the middle of each sector side. Each is drawn pointing into its
+ * sector from the hex edge, so two matching tiles show a mirrored pair across the edge.
+ */
+const symbolMarks = computed(() =>
+	edgeSymbolMarks(props.board).map((m) => {
+		const { x, y } = hexToPixel(m.hex, SIZE);
+		const out = 60 * m.direction + 30; // edge midpoint angle, degrees
+		const a = (Math.PI / 180) * out;
+		const d = (SIZE * Math.sqrt(3)) / 2;
+		return { ...m, x: x + d * Math.cos(a), y: y + d * Math.sin(a), angle: out + 180 };
+	}),
+);
 
 const sectorLabels = computed(() =>
 	props.board.sectors.map((s, i) => {
@@ -206,6 +220,37 @@ function onHexClick(key: string) {
 				:y2="l.y2"
 				class="sector-edge"
 			/>
+			<!-- Edge symbols (glyphs point along +x, into the sector) -->
+			<g
+				v-for="m in symbolMarks"
+				:key="`sym${m.sectorIndex}-${m.slot}`"
+				:transform="`translate(${m.x} ${m.y}) rotate(${m.angle})`"
+				class="edge-symbol"
+				:data-symbol="m.symbol"
+			>
+				<title>{{ m.symbol }}</title>
+				<line v-if="m.symbol === 'line'" x1="0" y1="0" x2="34" y2="0" />
+				<template v-else-if="m.symbol === 'bar'">
+					<line x1="0" y1="0" x2="30" y2="0" />
+					<line x1="30" y1="-11" x2="30" y2="11" />
+				</template>
+				<template v-else-if="m.symbol === 'square'">
+					<line x1="0" y1="0" x2="22" y2="0" />
+					<rect x="22" y="-8" width="16" height="16" />
+				</template>
+				<template v-else-if="m.symbol === 'circle'">
+					<line x1="0" y1="0" x2="24" y2="0" />
+					<circle cx="32" cy="0" r="8" />
+				</template>
+				<template v-else-if="m.symbol === 'arrow'">
+					<line x1="0" y1="0" x2="22" y2="0" />
+					<polygon points="22,-10 22,10 40,0" />
+				</template>
+				<template v-else-if="m.symbol === 'cup'">
+					<line x1="0" y1="0" x2="22" y2="0" />
+					<path d="M 32 -10 A 10 10 0 0 0 32 10" />
+				</template>
+			</g>
 			<text v-for="s in sectorLabels" :key="`s${s.i}`" :x="s.x" :y="s.y" text-anchor="middle" class="sector-label">{{ s.name }}</text>
 
 			<!-- Ships -->
@@ -307,6 +352,14 @@ function onHexClick(key: string) {
 	stroke: #c9d4ff;
 	stroke-width: 6;
 	stroke-linecap: round;
+	pointer-events: none;
+}
+.edge-symbol {
+	fill: none;
+	stroke: #f1f5ff;
+	stroke-width: 4;
+	stroke-linecap: round;
+	stroke-linejoin: round;
 	pointer-events: none;
 }
 .sector-label {
