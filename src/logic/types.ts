@@ -1,5 +1,6 @@
 import type { BaseGameState } from '@engine/client';
 import type { BoardState } from './board';
+import type { ExplorationToken } from '../data/exploration';
 
 // ---------------------------------------------------------------------------
 // Player colours (placeholder set — revisit once components are modelled)
@@ -80,6 +81,8 @@ export interface ZiaPlayer {
 	initiativeRoll: number;
 	/** Setup: finished buying starting outfits. */
 	outfittingDone: boolean;
+	/** Face-up exploration tokens on the ship mat. */
+	explorationTokens: ExplorationToken[];
 }
 
 export interface ZiaSetupData {
@@ -100,6 +103,8 @@ export interface LogLine {
 export interface TurnState {
 	/** Unspent movement points. */
 	movement: number;
+	/** Two face-up exploration tokens: the captain must choose 1 fame or 2,000 credits before anything else. */
+	explorationPairPending?: boolean;
 }
 
 export interface ZiaState extends BaseGameState {
@@ -109,6 +114,14 @@ export interface ZiaState extends BaseGameState {
 	board: BoardState;
 	/** Sector tile ids not yet explored; a random one is drawn for each Scan / Blind Jump. */
 	sectorDeck: string[];
+	/**
+	 * Exploration tokens not yet revealed (face-down on the board or still in the pile).
+	 * A token's face is drawn at random from here when it's flipped, so face-down tokens
+	 * don't leak their value in the shared game state.
+	 */
+	explorationPool: ExplorationToken[];
+	/** Board hexes holding a face-down exploration token. */
+	explorationSpaces: string[];
 	/** Setup ship-pick (and outfitting) order: highest d20 first, then counter-clockwise. */
 	pickOrder: string[];
 	/** Play order: the last captain to pick goes first, then clockwise. */

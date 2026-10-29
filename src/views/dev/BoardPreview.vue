@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import BoardMap from '../../components/board/BoardMap.vue';
 import { explorePlacement, slotCrossed, startingBoard, type BoardState } from '../../logic/board';
-import { startingDeck } from '../../logic/board';
+import { boardHexes, startingDeck } from '../../logic/board';
 import { HEX_DIRECTIONS, hexKey } from '../../logic/hex';
 
 const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
@@ -17,6 +17,9 @@ const query = new URLSearchParams(window.location.search);
 const players = ref(Math.min(5, Math.max(2, Number(query.get('players')) || 3)));
 const board = ref<BoardState>(startingBoard(seatsFor(players.value)));
 const note = ref('');
+
+/** Every exploration space shows a face-down token in the preview. */
+const tokens = computed(() => [...boardHexes(board.value).values()].filter((h) => h.kind === 'exploration').map((h) => h.key));
 
 // ?explore=1:NE,0:NE pre-explores from sector index through side, in order.
 for (const step of (query.get('explore') ?? '').split(',').filter(Boolean)) {
@@ -75,7 +78,7 @@ function exploreFrom(sectorIndex: number, slot: number): boolean {
 			<router-link to="/" class="ml-auto text-sm text-slate-500 hover:text-slate-300">← Lobby</router-link>
 		</header>
 		<div class="min-h-0 flex-1 p-4 pt-0">
-			<BoardMap :board="board" :ships="[]" @hex-click="onHexClick" />
+			<BoardMap :board="board" :ships="[]" :exploration-spaces="tokens" @hex-click="onHexClick" />
 		</div>
 	</div>
 </template>

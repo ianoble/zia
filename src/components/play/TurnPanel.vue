@@ -4,6 +4,7 @@ import { OUTFITS_BY_ID } from '../../data/outfits';
 import { freeEngineUseSpaces } from '../../logic/game';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
+import { explorationTokenLabel } from '../../data/exploration';
 import { shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
@@ -31,6 +32,8 @@ const scanSides = computed(() => {
 		.filter((e) => !seen.has(e.slot) && seen.add(e.slot))
 		.map((e) => ({ slot: e.slot, name: SLOT_NAMES[e.slot], symbol: edgeSymbolFacing(props.G.board.sectors[e.sectorIndex].rotation, e.slot) }));
 });
+const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
+const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
 
 const maxArm = computed(() => (ship.value ? Math.min(MARKERS_PER_SHIP - ship.value.armedMarkers, ship.value.energy) : 0));
@@ -45,6 +48,15 @@ watch(
 <template>
 	<div v-if="!myTurn" class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-300">
 		Waiting for <strong>{{ nameOf(currentPlayer) }}</strong> to take their turn.
+	</div>
+
+	<div v-else-if="ship && def && pairPending" class="space-y-3 rounded-lg border border-fuchsia-800/70 bg-slate-900/70 p-3 text-sm">
+		<p class="font-semibold text-fuchsia-200">You have two exploration tokens face up.</p>
+		<p class="text-xs text-slate-400">Discard both and choose a reward:</p>
+		<div class="grid grid-cols-2 gap-2">
+			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'fame')">1 fame</button>
+			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'credits')">2,000 credits</button>
+		</div>
 	</div>
 
 	<div v-else-if="ship && def" class="space-y-4 rounded-lg border border-sky-900/70 bg-slate-900/70 p-3 text-sm">
@@ -104,7 +116,10 @@ watch(
 					in, whatever is there.
 				</p>
 			</template>
-			<p v-else class="text-xs text-slate-500">
+			<p v-if="myTokens.length" class="text-xs text-slate-400">
+				Exploration tokens on your mat: <span class="text-fuchsia-300">{{ myTokens.map(explorationTokenLabel).join(', ') }}</span>
+			</p>
+			<p v-if="!(scanSides.length && deckLeft)" class="text-xs text-slate-500">
 				{{ deckLeft ? 'Move next to an unexplored edge (the outer rim of the map) to Scan or Blind Jump.' : 'Every sector has been explored.' }}
 			</p>
 		</div>

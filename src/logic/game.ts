@@ -5,6 +5,14 @@ import { IN_SCOPE_SHIPS, SHIPS_BY_ID } from '../data/ships';
 import { OUTFITS, OUTFITS_BY_ID, type Die } from '../data/outfits';
 import { SECTORS_BY_ID } from '../data/sectors';
 import {
+	EMBERS_EXPLORATION_TOKENS,
+	EXPLORATION_PAIR_CREDITS,
+	EXPLORATION_PAIR_FAME,
+	explorationTokenLabel,
+	type ExplorationCube,
+	type ExplorationToken,
+} from '../data/exploration';
+import {
 	boardHexes,
 	dealStartingTiles,
 	explorePlacement,
@@ -16,8 +24,8 @@ import {
 	startingSpawnFor,
 	unexploredEdges,
 } from './board';
-import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
-import { createShipState, shipDef } from './ship';
+import { canPlaceOutfit, cellKey, hullCells, occupancy, placedCells } from './holdGeometry';
+import { createShipState, isDestroyed, shipDef } from './ship';
 import {
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
@@ -86,6 +94,7 @@ export function createInitialState(
 			position: null,
 			initiativeRoll: rolls[id],
 			outfittingDone: false,
+			explorationTokens: [],
 		};
 	});
 
@@ -94,13 +103,15 @@ export function createInitialState(
 	const die = random?.Die ?? ((sides: number) => 1 + Math.floor(Math.random() * sides));
 	const board = startingBoard(seats, dealStartingTiles(seats.length, die));
 
-	return {
+	const G: ZiaState = {
 		history: [],
 		stage: 'pickShip',
 		players,
 		fameTarget: setupData?.fameTarget ?? DEFAULT_FAME_TARGET,
 		board,
 		sectorDeck: startingDeck(board),
+		explorationPool: [...EMBERS_EXPLORATION_TOKENS],
+		explorationSpaces: [],
 		pickOrder,
 		turnOrder,
 		supply,
@@ -110,6 +121,9 @@ export function createInitialState(
 			{ seat: null, text: 'Captains pick a Tier I ship, highest roll first.' },
 		],
 	};
+	// Setup step 2: a face-down exploration token on each exploration space of the starting tiles.
+	board.sectors.forEach((_, i) => placeExplorationTokens(G, i));
+	return G;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,11 +189,93 @@ function armMarkers(ship: ShipState, n: number) {
 
 const markersAvailableToArm = (ship: ShipState) => MARKERS_PER_SHIP - ship.armedMarkers;
 
+/** Put a face-down exploration token on each exploration space of a newly placed sector, while tokens last. */
+function placeExplorationTokens(G: ZiaState, sectorIndex: number) {
+	for (const h of boardHexes(G.board).values()) {
+		if (h.sectorIndex !== sectorIndex || h.kind !== 'exploration') continue;
+		if (G.explorationSpaces.length >= G.explorationPool.length) return;
+		G.explorationSpaces.push(h.key);
+	}
+}
+
+/**
+ * Put 1 ice damage in the hold: an empty space if there is one, else under an outfit.
+ * TODO: the captain chooses where it goes, and a shield can block it.
+ */
+function addIceDamage(ship: ShipState) {
+	const hit = new Set([...ship.damage, ...ship.iceDamage]);
+	const cargo = new Set(ship.cargo.map((c) => c.cell));
+	const occupied = occupancy(ship.outfits);
+	const free = [...hullCells(shipDef(ship))].filter((k) => !hit.has(k));
+	const cell = free.find((k) => !occupied.has(k) && !cargo.has(k)) ?? free.find((k) => !cargo.has(k)) ?? free[0];
+	if (!cell) return;
+	ship.iceDamage.push(cell);
+	ship.cargo = ship.cargo.filter((c) => c.cell !== cell);
+	// A marker on a damaged use space is disarmed.
+	for (const o of ship.outfits) {
+		const use = placedCells(o).find((c) => c.kind === 'U' && cellKey(c.x, c.y) === cell);
+		if (use && o.usedSpaces.includes(use.useIndex)) {
+			o.usedSpaces = o.usedSpaces.filter((u) => u !== use.useIndex);
+			ship.disarmedMarkers++;
+		}
+	}
+}
+
+/** Put a cargo cube in an empty hold space; returns false (jettisoned) if there's no room. */
+function addCargo(ship: ShipState, color: ExplorationCube): boolean {
+	const blocked = new Set([...ship.damage, ...ship.iceDamage, ...ship.cargo.map((c) => c.cell), ...occupancy(ship.outfits).keys()]);
+	const cell = [...hullCells(shipDef(ship))].find((k) => !blocked.has(k));
+	if (!cell) return false;
+	ship.cargo.push({ cell, color });
+	return true;
+}
+
+/** Tokens on the mat that pair up for the fame/credits reward (Captain in Need stays until its mission is done). */
+const pairableTokens = (tokens: ExplorationToken[]) => tokens.filter((t) => t !== 'captain-in-need');
+
+/**
+ * Exploration space (rulebook p22): the first ship to move onto it flips the token,
+ * resolves it and keeps it face up on its mat. Returns true if the ship was destroyed.
+ * TODO: also collect when passing through, not only when a move ends there.
+ */
+function collectExplorationToken(G: ZiaState, seat: string, hex: string, random: RandomApi): boolean {
+	const at = G.explorationSpaces.indexOf(hex);
+	if (at < 0 || !G.explorationPool.length) return false;
+	G.explorationSpaces.splice(at, 1);
+	const [token] = G.explorationPool.splice(random.Die(G.explorationPool.length) - 1, 1);
+	const p = G.players[seat];
+	const ship = p.ship!;
+	p.explorationTokens.push(token);
+
+	let text = `flipped an exploration token: ${explorationTokenLabel(token)}`;
+	if (token === 'movement') {
+		G.turn.movement += 5;
+	} else if (token === 'energy') {
+		ship.energy = shipDef(ship).energy;
+	} else if (token === 'ice-damage') {
+		addIceDamage(ship);
+	} else if (token === 'captain-in-need') {
+		text += ' (missions come later)';
+	} else {
+		const color = token.slice('cargo-'.length) as ExplorationCube;
+		if (!addCargo(ship, color)) text += ', but the hold is full so it was jettisoned';
+	}
+	log(G, seat, text);
+
+	if (isDestroyed(ship)) {
+		destroyShip(G, seat, 'ice damage filled the hold');
+		return true;
+	}
+	if (pairableTokens(p.explorationTokens).length >= 2) G.turn.explorationPairPending = true;
+	return false;
+}
+
 /** Draw a random tile from the sector deck and place it against `sectorIndex`'s `slot` side. */
 function exploreSector(G: ZiaState, random: RandomApi, sectorIndex: number, slot: number): string {
 	const [tileId] = G.sectorDeck.splice(random.Die(G.sectorDeck.length) - 1, 1);
 	const placed = explorePlacement(G.board, sectorIndex, slot)!;
 	G.board.sectors.push({ tileId, ...placed });
+	placeExplorationTokens(G, G.board.sectors.length - 1);
 	return SECTORS_BY_ID[tileId]?.name ?? tileId;
 }
 
@@ -237,6 +333,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (playerID !== currentPlayer) return 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
+	if (G.turn.explorationPairPending && moveName !== 'claimExplorationPair') {
+		return 'First choose 1 fame or 2,000 credits for your two exploration tokens';
+	}
 
 	switch (moveName) {
 		case 'pickShip': {
@@ -329,6 +428,10 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			return true;
 		}
 
+		case 'claimExplorationPair':
+			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
+			return args[0] === 'fame' || args[0] === 'credits' ? true : 'Choose fame or credits';
+
 		case 'endTurn': {
 			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
 			const n = args[0] ?? 0;
@@ -419,12 +522,23 @@ const moves = {
 		log(G, playerID, `fired the ${def.name}: rolled ${roll}${penalty ? ` −${penalty} damage` : ''} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 
-	moveShip: guarded('moveShip', ({ G, playerID }, target: string) => {
+	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string) => {
 		const p = G.players[playerID];
 		const cost = reachableHexes(G.board, p.position!, G.turn.movement, occupiedHexes(G, playerID)).get(target)!;
 		p.position = target;
 		G.turn.movement -= cost;
 		log(G, playerID, `moved ${cost} space${cost === 1 ? '' : 's'}`);
+		if (collectExplorationToken(G, playerID, target, random)) events.endTurn();
+	}),
+
+	/** Two face-up exploration tokens: discard both for 1 fame or 2,000 credits. */
+	claimExplorationPair: guarded('claimExplorationPair', ({ G, playerID }, choice: 'fame' | 'credits') => {
+		const p = G.players[playerID];
+		for (let n = 0; n < 2; n++) p.explorationTokens.splice(p.explorationTokens.findIndex((t) => t !== 'captain-in-need'), 1);
+		G.turn.explorationPairPending = false;
+		if (choice === 'fame') p.fame += EXPLORATION_PAIR_FAME;
+		else p.credits += EXPLORATION_PAIR_CREDITS;
+		log(G, playerID, `discarded two exploration tokens for ${choice === 'fame' ? '1 fame' : '2,000 credits'}`);
 	}),
 
 	/**
@@ -454,6 +568,8 @@ const moves = {
 		log(G, playerID, `blind jumped past the ${SLOT_NAMES[edge.slot]} edge into ${name}`);
 		if (boardHexes(G.board).get(target)?.kind === 'star') {
 			destroyShip(G, playerID, 'blind jumped into a star');
+			events.endTurn();
+		} else if (collectExplorationToken(G, playerID, target, random)) {
 			events.endTurn();
 		}
 	}),
@@ -504,7 +620,7 @@ const ZiaGame: Game<ZiaState> = {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
 				onBegin: ({ G, ctx, random }) => {
-					G.turn = { movement: 0 };
+					G.turn = { movement: 0, explorationPairPending: false };
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},

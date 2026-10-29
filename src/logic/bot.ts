@@ -44,6 +44,8 @@ export function botDecision(G: ZiaState, seat: string, currentPlayer: string, ra
 		return { move: 'finishOutfitting', args: [] };
 	}
 
+	if (G.stage === 'play' && G.turn.explorationPairPending) return { move: 'claimExplorationPair', args: ['fame'] };
+
 	if (G.stage === 'play' && p.ship && p.position) {
 		// Spend movement on a random reachable space, preferring the farthest.
 		if (G.turn.movement > 0) {

@@ -8,7 +8,7 @@
  */
 import type { Axial } from '../logic/hex';
 
-export type SpaceKind = 'spawn' | 'star';
+export type SpaceKind = 'spawn' | 'star' | 'exploration';
 
 /**
  * Edge symbols printed in the middle of each side of a sector tile. Each is a short
@@ -144,13 +144,22 @@ const slug = (name: string) =>
 
 /**
  * Placeholder layout until the real one is entered: a spawn point in the centre for
- * tiles that have one, and the inner 7 hexes as star for star tiles.
+ * tiles that have one, exploration spaces next to it, and the inner 7 hexes as star for
+ * star tiles.
  */
-function placeholderSpaces(types: SectorType[], spawnPoint: number | undefined): SectorSpace[] {
+function placeholderSpaces(types: SectorType[], spawnPoint: number | undefined, explorationSpaces: number): SectorSpace[] {
 	if (types.includes('Star')) return INNER_SEVEN.map((at) => ({ at, kind: 'star' as const }));
-	if (spawnPoint != null) return [{ at: { q: 0, r: 0 }, kind: 'spawn', number: spawnPoint }];
-	return [];
+	const spaces: SectorSpace[] = [];
+	if (spawnPoint != null) spaces.push({ at: { q: 0, r: 0 }, kind: 'spawn', number: spawnPoint });
+	PLACEHOLDER_EXPLORATION_HEXES.slice(0, explorationSpaces).forEach((at) => spaces.push({ at, kind: 'exploration' }));
+	return spaces;
 }
+
+/** Where placeholder exploration spaces go: just above, then just below, the centre. */
+const PLACEHOLDER_EXPLORATION_HEXES: Axial[] = [
+	{ q: 0, r: -1 },
+	{ q: 0, r: 1 },
+];
 
 export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, shortName, types, spawn, exploration, missions, features]) => {
 	const typeList = types.split('/') as SectorType[];
@@ -166,7 +175,7 @@ export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, short
 		explorationSpaces: exploration,
 		missionPoints: missions,
 		features: features ? features.split(';').map((f) => f.trim()) : [],
-		spaces: placeholderSpaces(typeList, spawnPoint),
+		spaces: placeholderSpaces(typeList, spawnPoint, exploration),
 		layoutPlaceholder: true,
 	};
 });

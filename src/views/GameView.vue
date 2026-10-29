@@ -168,7 +168,11 @@ onUnmounted(() => disconnect());
 							<span class="ml-auto text-xs font-normal text-slate-500">{{ mapCollapsed ? 'Show' : 'Hide' }}</span>
 						</button>
 						<div v-show="!mapCollapsed" class="h-[52vh] min-h-[380px]">
-							<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" :jump-targets="jumpTargets" @hex-click="onHexClick" />
+							<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable"
+								:jump-targets="jumpTargets"
+								:exploration-spaces="G.explorationSpaces"
+								@hex-click="onHexClick"
+							/>
 						</div>
 					</section>
 

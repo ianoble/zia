@@ -24,6 +24,8 @@ const props = defineProps<{
 	reachable?: Map<string, number> | null;
 	/** Unexplored hexes (off the board) the active ship can Blind Jump into. */
 	jumpTargets?: string[] | null;
+	/** Hexes holding a face-down exploration token. */
+	explorationSpaces?: string[] | null;
 }>();
 const emit = defineEmits<{ hexClick: [key: string] }>();
 
@@ -127,6 +129,11 @@ const sectorLabels = computed(() =>
 
 /** Hover text for every hex: its sector's name, type and features. */
 const sectorTitles = computed(() => sectorLabels.value.map((s) => (s.info ? `${s.name} — ${s.info}` : s.name)));
+
+/** Face-down exploration tokens, drawn on their hex. */
+const tokenViews = computed(() =>
+	(props.explorationSpaces ?? []).map((key) => ({ key, ...hexToPixel(parseHexKey(key), SIZE) })),
+);
 
 const shipViews = computed(() =>
 	props.ships.map((s) => {
@@ -266,6 +273,12 @@ function onHexClick(key: string) {
 			</g>
 			<text v-for="s in sectorLabels" :key="`s${s.i}`" :x="s.x" :y="s.y" text-anchor="middle" class="sector-label">{{ s.name }}</text>
 
+			<!-- Face-down exploration tokens -->
+			<g v-for="t in tokenViews" :key="`tok${t.key}`" :transform="`translate(${t.x} ${t.y})`" class="exploration-token">
+				<circle r="34" />
+				<text y="14" text-anchor="middle">?</text>
+			</g>
+
 			<!-- Ships -->
 			<g v-for="s in shipViews" :key="`ship${s.seat}`" class="ship" :class="{ active: s.active }" :transform="`translate(${s.x} ${s.y})`">
 				<circle v-if="s.active" r="70" class="ship-halo" />
@@ -376,6 +389,19 @@ function onHexClick(key: string) {
 	font-size: 40px;
 	fill: #f2c230;
 	pointer-events: none;
+}
+.exploration-token {
+	pointer-events: none;
+}
+.exploration-token circle {
+	fill: #3f6212;
+	stroke: #d946ef;
+	stroke-width: 5;
+}
+.exploration-token text {
+	font-size: 40px;
+	font-weight: 900;
+	fill: #f0abfc;
 }
 .sector-edge {
 	stroke: #c9d4ff;
