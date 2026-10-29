@@ -34,7 +34,7 @@ const gameOver = computed(() => gameover.value as ZiaGameOver | undefined);
 
 /** Lobby colour if one was picked, else the colour assigned at setup. */
 function playerColor(seat: string): PlayerColor {
-	return seats.value[seat]?.color ?? G.value?.players[seat]?.color ?? 'red';
+	return seats.value[seat]?.color ?? G.value?.players?.[seat]?.color ?? 'red';
 }
 const colorOf = (seat: string) => PLAYER_HEX[playerColor(seat)];
 
@@ -112,12 +112,12 @@ watch(
 	() => props.playerID,
 	(id) => (viewedSeat.value = id),
 );
-const viewedShip = computed(() => G.value?.players[viewedSeat.value]?.ship ?? null);
+const viewedShip = computed(() => G.value?.players?.[viewedSeat.value]?.ship ?? null);
 
 /** My damage waiting to be placed: highlight where it can go on my ship mat. */
-const myPendingDamage = computed(() => G.value?.players[props.playerID]?.pendingDamage ?? []);
+const myPendingDamage = computed(() => G.value?.players?.[props.playerID]?.pendingDamage ?? []);
 const damageTargetCells = computed(() => {
-	const ship = G.value?.players[props.playerID]?.ship;
+	const ship = G.value?.players?.[props.playerID]?.ship;
 	return myPendingDamage.value.length && ship && viewedSeat.value === props.playerID ? damageTargets(ship) : null;
 });
 // Show my ship when I have damage to place.
