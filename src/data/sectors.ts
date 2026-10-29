@@ -3,12 +3,31 @@
  * coordinates relative to the tile's centre hex.
  *
  * Tile names, types, spawn points, counts and features come from the tile listing.
- * Hex layouts (where planets, borders, exploration spaces and mission points sit) are
- * still placeholders. Edge symbols are the same on every tile (EDGE_SYMBOLS below).
+ * Hex layouts of the base game tiles are in tileLayouts.ts; Embers tiles other than Nyr
+ * still have placeholder layouts. Edge symbols are the same on every tile (EDGE_SYMBOLS below).
  */
 import { hexesInRange, type Axial } from '../logic/hex';
+import { parseLayout, TILE_LAYOUTS, type LayoutCode } from './tileLayouts';
 
-export type SpaceKind = 'spawn' | 'star' | 'exploration';
+/**
+ * What a space holds. A hex can have several (e.g. an exploration space in an asteroid,
+ * a buy space on a planet).
+ */
+export type SpaceKind =
+	| 'spawn'
+	| 'star'
+	| 'exploration'
+	| 'mission'
+	| 'planet'
+	| 'buy'
+	| 'sell'
+	| 'asteroid'
+	| 'debris'
+	| 'nebula'
+	| 'gate'
+	| 'harvest'
+	| 'salvage'
+	| 'mine';
 
 /**
  * Edge symbols printed in the middle of each side of a sector tile. Each is a short
@@ -166,6 +185,34 @@ const KNOWN_LAYOUTS: Record<number, SectorSpace[]> = {
 	28: INNER_SEVEN.map((at) => ({ at, kind: 'star' })),
 };
 
+const CODE_KINDS: Record<LayoutCode, SpaceKind> = {
+	S: 'spawn',
+	E: 'exploration',
+	M: 'mission',
+	P: 'planet',
+	B: 'buy',
+	L: 'sell',
+	A: 'asteroid',
+	D: 'debris',
+	N: 'nebula',
+	G: 'gate',
+	H: 'harvest',
+	V: 'salvage',
+	X: 'mine',
+};
+
+/** A transcribed layout from tileLayouts.ts, as spaces (the spawn point gets the tile's number). */
+function layoutSpaces(number: number, spawnPoint: number | undefined): SectorSpace[] | null {
+	const columns = TILE_LAYOUTS[number];
+	if (!columns) return null;
+	return parseLayout(columns).flatMap(({ at, codes }) =>
+		codes.map((c) => {
+			const kind = CODE_KINDS[c];
+			return kind === 'spawn' && spawnPoint != null ? { at, kind, number: spawnPoint } : { at, kind };
+		}),
+	);
+}
+
 /** Where placeholder exploration spaces go: just above, then just below, the centre. */
 const PLACEHOLDER_EXPLORATION_HEXES: Axial[] = [
 	{ q: 0, r: -1 },
@@ -186,8 +233,8 @@ export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, short
 		explorationSpaces: exploration,
 		missionPoints: missions,
 		features: features ? features.split(';').map((f) => f.trim()) : [],
-		spaces: KNOWN_LAYOUTS[number] ?? placeholderSpaces(typeList, spawnPoint, exploration),
-		layoutPlaceholder: !(number in KNOWN_LAYOUTS),
+		spaces: KNOWN_LAYOUTS[number] ?? layoutSpaces(number, spawnPoint) ?? placeholderSpaces(typeList, spawnPoint, exploration),
+		layoutPlaceholder: !(number in KNOWN_LAYOUTS) && !(number in TILE_LAYOUTS),
 	};
 });
 

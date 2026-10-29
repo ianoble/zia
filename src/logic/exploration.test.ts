@@ -148,8 +148,9 @@ describe('collecting exploration tokens', () => {
 
 describe('move routes', () => {
 	const board = startingBoard(['0', '1']);
-	const spawn = startingSpawnFor(board, '0')!;
-	const [q, r] = spawn.split(',').map(Number);
+	// The middle of seat 0's starting sector: every hex within 2 is on the board.
+	const { q, r } = board.sectors[1].center;
+	const spawn = `${q},${r}`;
 
 	it('takes a shortest path', () => {
 		const path = movePath(board, spawn, `${q},${r - 2}`, 5)!;

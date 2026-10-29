@@ -29,7 +29,10 @@ export interface BoardHex {
 	key: string;
 	hex: Axial;
 	sectorIndex: number;
-	kind: SpaceKind | null;
+	/** The space's main role for the rules so far: star, spawn point or exploration space. */
+	kind: PrimaryKind | null;
+	/** Everything on the space (planet, asteroid, mission point, buy space, …). */
+	kinds: SpaceKind[];
 	/** Spawn point number, for spawn spaces that have one. */
 	spawnNumber?: number;
 }
@@ -160,17 +163,27 @@ export function startingBoard(seats: string[], tileIds: string[] = STARTING_CAND
 	};
 }
 
+/** Kinds the rules act on so far, in priority order, for BoardHex.kind. */
+const PRIMARY_KINDS = ['star', 'spawn', 'exploration'] as const;
+export type PrimaryKind = (typeof PRIMARY_KINDS)[number];
+
 /** Every hex on the board, keyed "q,r". */
 export function boardHexes(board: BoardState): Map<string, BoardHex> {
 	const map = new Map<string, BoardHex>();
 	board.sectors.forEach((s, sectorIndex) => {
 		const def = SECTORS_BY_ID[s.tileId];
-		const special = new Map<string, SectorSpace>();
-		for (const sp of def?.spaces ?? []) special.set(hexKey(addHex(s.center, rotateHex(sp.at, s.rotation))), sp);
+		const special = new Map<string, SectorSpace[]>();
+		for (const sp of def?.spaces ?? []) {
+			const key = hexKey(addHex(s.center, rotateHex(sp.at, s.rotation)));
+			special.set(key, [...(special.get(key) ?? []), sp]);
+		}
 		for (const hex of sectorHexes(s.center)) {
 			const key = hexKey(hex);
-			const sp = special.get(key);
-			map.set(key, { key, hex, sectorIndex, kind: sp?.kind ?? null, ...(sp?.number != null ? { spawnNumber: sp.number } : {}) });
+			const spaces = special.get(key) ?? [];
+			const kinds = spaces.map((sp) => sp.kind);
+			const kind = PRIMARY_KINDS.find((k) => kinds.includes(k)) ?? null;
+			const spawnNumber = spaces.find((sp) => sp.kind === 'spawn')?.number;
+			map.set(key, { key, hex, sectorIndex, kind, kinds, ...(spawnNumber != null ? { spawnNumber } : {}) });
 		}
 	});
 	return map;

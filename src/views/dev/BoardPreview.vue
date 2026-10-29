@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import BoardMap from '../../components/board/BoardMap.vue';
 import { explorePlacement, slotCrossed, startingBoard, type BoardState } from '../../logic/board';
 import { boardHexes, startingDeck } from '../../logic/board';
+import { SECTOR_TILES } from '../../data/sectors';
 import { HEX_DIRECTIONS, hexKey } from '../../logic/hex';
 
 const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
@@ -15,7 +16,23 @@ const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
 
 const query = new URLSearchParams(window.location.search);
 const players = ref(Math.min(5, Math.max(2, Number(query.get('players')) || 3)));
-const board = ref<BoardState>(startingBoard(seatsFor(players.value)));
+// ?start=loath,lunari,… picks the starting tiles (in seat order).
+const startTiles = query.get('start')?.split(',').filter(Boolean);
+if (startTiles?.length) players.value = Math.min(5, Math.max(2, startTiles.length));
+const freshBoard = () => (startTiles?.length ? startingBoard(seatsFor(players.value), startTiles) : startingBoard(seatsFor(players.value)));
+// ?gallery=1 shows every tile upright (as printed), in number order, to check layouts.
+const gallery = query.get('gallery') === '1';
+function galleryBoard(): BoardState {
+	return {
+		sectors: SECTOR_TILES.map((t, i) => {
+			const col = i % 6;
+			const row = Math.floor(i / 6);
+			// Two sector-widths apart across, one tile-height-and-a-bit down, so tiles don't touch.
+			return { tileId: t.id, center: { q: col * 10 + row, r: col * -6 + row * 7 }, rotation: 0 };
+		}),
+	};
+}
+const board = ref<BoardState>(gallery ? galleryBoard() : freshBoard());
 const note = ref('');
 
 /** Every exploration space shows a face-down token in the preview. */
@@ -32,7 +49,7 @@ function seatsFor(n: number) {
 }
 
 function reset() {
-	board.value = startingBoard(seatsFor(players.value));
+	board.value = freshBoard();
 	note.value = '';
 }
 

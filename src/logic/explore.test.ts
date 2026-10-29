@@ -76,9 +76,11 @@ describe('sector deck', () => {
 describe('Scan Sector', () => {
 	it('needs an unexplored edge next to the ship', () => {
 		const c = playClient();
-		const spawn = c.G().players[c.seat].position!;
-		expect(unexploredEdges(c.G().board, spawn)).toHaveLength(0);
-		expect(c.act('scanSector', 0)).toBe(false);
+		// A ship in the middle of its starting sector is nowhere near an unexplored edge.
+		const { q, r } = c.G().board.sectors.find((s) => s.ownerSeat === c.seat)!.center;
+		const G = { ...c.G(), players: { ...c.G().players, [c.seat]: { ...c.G().players[c.seat], position: `${q},${r}` } } };
+		expect(unexploredEdges(G.board, `${q},${r}`)).toHaveLength(0);
+		for (let slot = 0; slot < 6; slot++) expect(checkMove(G, c.seat, c.seat, 'scanSector', [slot])).not.toBe(true);
 	});
 
 	it('costs 1 energy, ends movement and places a matching tile', () => {

@@ -41,9 +41,53 @@ const hexes = computed(() =>
 			points: hexCorners(x, y, SIZE)
 				.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`)
 				.join(' '),
+			terrain: TERRAINS.find((t) => h.kinds.includes(t)) ?? null,
+			planetSide: planetSide(h.sectorIndex),
 		};
 	}),
 );
+
+/** Terrain a hex is drawn with (one per hex). */
+const TERRAINS = ['planet', 'asteroid', 'debris', 'nebula', 'gate'] as const;
+
+/** Planet shield colour follows the sector's alignment: Lawful blue, Outlaw red, otherwise green. */
+function planetSide(sectorIndex: number): 'lawful' | 'outlaw' | 'neutral' {
+	const types = SECTORS_BY_ID[props.board.sectors[sectorIndex]?.tileId]?.types ?? [];
+	return types.includes('Lawful') ? 'lawful' : types.includes('Outlaw') ? 'outlaw' : 'neutral';
+}
+
+/**
+ * Region borders: a planet's shield and a nebula's edge run around the whole region;
+ * asteroids, debris and gates are outlined hex by hex.
+ */
+const terrainEdges = computed(() => {
+	const all = boardHexes(props.board);
+	const lines: { x1: number; y1: number; x2: number; y2: number; cls: string }[] = [];
+	for (const h of hexes.value) {
+		if (!h.terrain) continue;
+		const corners = hexCorners(h.x, h.y, SIZE * (h.terrain === 'planet' || h.terrain === 'nebula' ? 0.97 : 0.86));
+		const cls = h.terrain === 'planet' ? `edge-planet ${h.planetSide}` : `edge-${h.terrain}`;
+		HEX_DIRECTIONS.forEach((d, i) => {
+			if (h.terrain === 'planet' || h.terrain === 'nebula') {
+				const n = all.get(hexKey(addHex(h.hex, d)));
+				if (n && n.sectorIndex === h.sectorIndex && n.kinds.includes(h.terrain)) return;
+			}
+			const a = corners[i];
+			const b = corners[(i + 1) % 6];
+			lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, cls });
+		});
+	}
+	return lines;
+});
+
+/** Labels for printed spaces: mission point, buy/sell, harvest, salvage, mining. */
+const SPACE_LABELS: [kind: string, text: string][] = [
+	['buy', 'BUY'],
+	['sell', 'SELL'],
+	['harvest', 'HARVEST'],
+	['salvage', 'SALVAGE'],
+	['mine', 'MINING'],
+];
 
 /** Ghost hexes off the board for Blind Jump destinations. */
 const jumpViews = computed(() =>
@@ -232,13 +276,35 @@ function onHexClick(key: string) {
 			<!-- Spaces -->
 			<g v-for="h in hexes" :key="h.key" :data-hex="h.key" class="hex" :class="{ reachable: reachable?.has(h.key) }" @click="onHexClick(h.key)">
 				<title>{{ sectorTitles[h.sectorIndex] }}</title>
-				<polygon :points="h.points" class="hex-shape" :class="{ 'star-hex': h.kind === 'star' }" />
+				<polygon
+					:points="h.points"
+					class="hex-shape"
+					:class="[{ 'star-hex': h.kind === 'star' }, h.terrain ? `terrain-${h.terrain}` : '', h.terrain === 'planet' ? h.planetSide : '']"
+				/>
 				<g v-if="h.kind === 'spawn'" class="spawn">
-					<circle :cx="h.x" :cy="h.y" r="46" />
-					<text :x="h.x" :y="h.y + 13" text-anchor="middle">⟳</text>
+					<circle :cx="h.x" :cy="h.y" r="40" />
+					<text :x="h.x" :y="h.y + 13" text-anchor="middle">{{ h.spawnNumber ?? '⟳' }}</text>
 				</g>
+				<g v-if="h.kinds.includes('mission')" class="mission" :transform="`translate(${h.x} ${h.y})`">
+					<polygon points="-34,-26 34,-26 0,32" />
+					<text y="8" text-anchor="middle">!</text>
+				</g>
+				<template v-for="[kind, text] in SPACE_LABELS" :key="kind">
+					<text v-if="h.kinds.includes(kind as never)" :x="h.x" :y="h.y + 10" text-anchor="middle" class="space-label">{{ text }}</text>
+				</template>
 				<text v-if="reachable?.has(h.key)" :x="h.x" :y="h.y + 78" text-anchor="middle" class="cost">{{ reachable.get(h.key) }}</text>
 			</g>
+
+			<!-- Planet shields, nebula edges, asteroid / debris / gate outlines -->
+			<line
+				v-for="(l, i) in terrainEdges"
+				:key="`te${i}`"
+				:x1="l.x1"
+				:y1="l.y1"
+				:x2="l.x2"
+				:y2="l.y2"
+				:class="['terrain-edge', l.cls]"
+			/>
 
 			<!-- Blind Jump destinations (unexplored space) -->
 			<g v-for="j in jumpViews" :key="`jump${j.key}`" :data-hex="j.key" class="hex jump" @click="onHexClick(j.key)">
@@ -337,6 +403,77 @@ function onHexClick(key: string) {
 }
 .hex:hover .hex-shape {
 	fill: #1a2244;
+}
+.hex-shape.terrain-planet.neutral {
+	fill: #1d3b2acc;
+}
+.hex-shape.terrain-planet.lawful {
+	fill: #1b2f52cc;
+}
+.hex-shape.terrain-planet.outlaw {
+	fill: #4a2a14cc;
+}
+.hex-shape.terrain-asteroid {
+	fill: #3a2a1acc;
+}
+.hex-shape.terrain-debris {
+	fill: #33331fcc;
+}
+.hex-shape.terrain-nebula {
+	fill: #3a1640cc;
+}
+.hex-shape.terrain-gate {
+	fill: #1f3a1fcc;
+}
+.terrain-edge {
+	stroke-width: 6;
+	stroke-linecap: round;
+	pointer-events: none;
+}
+.edge-planet.neutral {
+	stroke: #9be15d;
+}
+.edge-planet.lawful {
+	stroke: #8ec5ff;
+}
+.edge-planet.outlaw {
+	stroke: #ff8a4c;
+}
+.edge-nebula {
+	stroke: #ec4fb4;
+}
+.edge-asteroid {
+	stroke: #f08a24;
+	stroke-dasharray: 10 6;
+}
+.edge-debris {
+	stroke: #e5e34a;
+	stroke-dasharray: 10 6;
+}
+.edge-gate {
+	stroke: #7bd04a;
+}
+.mission polygon {
+	fill: #3b82f6;
+	stroke: #f97316;
+	stroke-width: 6;
+	pointer-events: none;
+}
+.mission text {
+	font-size: 34px;
+	font-weight: 900;
+	fill: #fff;
+	pointer-events: none;
+}
+.space-label {
+	font-size: 22px;
+	font-weight: 800;
+	fill: #f8fafc;
+	stroke: #05060f;
+	stroke-width: 5;
+	paint-order: stroke;
+	letter-spacing: 0.04em;
+	pointer-events: none;
 }
 .hex.reachable .hex-shape {
 	fill: #13466acc;

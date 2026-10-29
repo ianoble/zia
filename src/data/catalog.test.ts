@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NYR_SECTOR, SECTOR_TILES, SECTORS_BY_ID, STARTING_CANDIDATES } from './sectors';
+import { parseLayout, TILE_LAYOUTS } from './tileLayouts';
 import { SHIPS, IN_SCOPE_SHIPS } from './ships';
 import { OUTFITS } from './outfits';
 import { parseShape } from '../logic/holdGeometry';
@@ -64,5 +65,30 @@ describe('sector tiles', () => {
 		for (const t of SECTOR_TILES.filter((x) => x.types.includes('Gate'))) expect(t.explorationSpaces).toBe(0);
 		expect(SECTORS_BY_ID['ferren-s-call'].explorationSpaces).toBe(2);
 		expect(SECTORS_BY_ID['tig'].types).toEqual(['Neutral', 'Anomaly']);
+	});
+});
+
+describe('transcribed tile layouts', () => {
+	const numbers = Object.keys(TILE_LAYOUTS).map(Number);
+
+	it('cover all 21 base game tiles except Xia (whole tile star, set separately)', () => {
+		const base = SECTOR_TILES.filter((t) => t.expansion === 'base' && t.number !== 20).map((t) => t.number);
+		expect(numbers.sort((a, b) => a - b)).toEqual(base);
+	});
+
+	it.each(numbers)('tile %i has 19 hexes and matches the tile listing', (n) => {
+		expect(parseLayout(TILE_LAYOUTS[n])).toHaveLength(19);
+		const tile = SECTOR_TILES.find((t) => t.number === n)!;
+		const count = (kind: string) => tile.spaces.filter((s) => s.kind === kind).length;
+		expect(count('exploration')).toBe(tile.explorationSpaces);
+		expect(count('mission')).toBe(tile.missionPoints);
+		expect(count('spawn')).toBe(tile.spawnPoint != null ? 1 : 0);
+		expect(tile.layoutPlaceholder).toBe(false);
+		const spawn = tile.spaces.find((s) => s.kind === 'spawn');
+		if (spawn) expect(spawn.number).toBe(tile.spawnPoint);
+		// Buy / sell spaces are on the planet.
+		for (const s of tile.spaces.filter((x) => x.kind === 'buy' || x.kind === 'sell')) {
+			expect(tile.spaces.some((x) => x.kind === 'planet' && x.at.q === s.at.q && x.at.r === s.at.r)).toBe(true);
+		}
 	});
 });

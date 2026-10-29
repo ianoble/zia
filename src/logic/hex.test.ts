@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addHex, HEX_DIRECTIONS, hexDistance, hexKey, hexToPixel, rotateHex, SECTOR_NEIGHBOR_OFFSETS, sectorHexes, sectorSlotOf } from './hex';
+import { addHex, HEX_DIRECTIONS, hexDistance, parseHexKey, hexKey, hexToPixel, rotateHex, SECTOR_NEIGHBOR_OFFSETS, sectorHexes, sectorSlotOf } from './hex';
 import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS } from '../data/sectors';
 import {
 	boardHexes,
@@ -110,10 +110,10 @@ describe('board', () => {
 
 	it('movement crosses from a starting sector into Nyr', () => {
 		const board = startingBoard(['0', '1']);
-		const spawn = startingSpawnFor(board, '1')!; // seat 1 starts east of Nyr, centre (5,-3)
-		expect(spawn).toBe('5,-3');
-		const costs = movementCosts(board, spawn, 5);
-		expect(costs.get('2,-1')).toBe(3);
+		const spawn = startingSpawnFor(board, '1')!; // seat 1 starts east of Nyr
+		const costs = movementCosts(board, spawn, 10);
+		// Nyr's east orbit hex, reached by the direct route (nothing in the way).
+		expect(costs.get('2,-1')).toBe(hexDistance(parseHexKey(spawn), { q: 2, r: -1 }));
 	});
 
 	it('cannot end on an occupied hex but can pass through', () => {
