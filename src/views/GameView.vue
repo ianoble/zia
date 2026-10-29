@@ -100,6 +100,11 @@ function act(name: string, ...args: unknown[]) {
 	move(name, ...args);
 }
 
+// Collapsible map, remembered across reloads, so the ship mat can take the top of the page.
+const MAP_COLLAPSED_KEY = 'zia:mapCollapsed';
+const mapCollapsed = ref(localStorage.getItem(MAP_COLLAPSED_KEY) === '1');
+watch(mapCollapsed, (v) => localStorage.setItem(MAP_COLLAPSED_KEY, v ? '1' : '0'));
+
 // Ship mats below the board: mine by default, tabs for the others.
 const viewedSeat = ref(props.playerID);
 watch(
@@ -151,8 +156,20 @@ onUnmounted(() => disconnect());
 			<div class="grid items-start gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
 				<!-- Left: board, then the ship mat / setup step directly underneath -->
 				<div class="min-w-0 space-y-4">
-					<section class="h-[52vh] min-h-[380px]">
-						<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" :jump-targets="jumpTargets" @hex-click="onHexClick" />
+					<section>
+						<button
+							type="button"
+							class="mb-2 flex w-full items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-left text-sm font-semibold text-slate-300 hover:border-slate-600"
+							:aria-expanded="!mapCollapsed"
+							@click="mapCollapsed = !mapCollapsed"
+						>
+							<span class="inline-block transition-transform" :class="mapCollapsed ? '' : 'rotate-90'">▶</span>
+							Map
+							<span class="ml-auto text-xs font-normal text-slate-500">{{ mapCollapsed ? 'Show' : 'Hide' }}</span>
+						</button>
+						<div v-show="!mapCollapsed" class="h-[52vh] min-h-[380px]">
+							<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" :jump-targets="jumpTargets" @hex-click="onHexClick" />
+						</div>
 					</section>
 
 				<!-- Stage content -->
