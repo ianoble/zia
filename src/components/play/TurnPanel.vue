@@ -5,7 +5,7 @@ import { freeEngineUseSpaces } from '../../logic/game';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import { explorationTokenLabel } from '../../data/exploration';
-import { shipDef } from '../../logic/ship';
+import { engineRollResult, shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
 /** Active captain's controls: impulse, fire engines, then end turn (Status Phase: arm markers). */
@@ -20,7 +20,12 @@ const movement = computed(() => props.G.turn.movement);
 const engines = computed(() =>
 	(ship.value?.outfits ?? [])
 		.filter((o) => OUTFITS_BY_ID[o.outfitId].type === 'engine')
-		.map((o) => ({ uid: o.uid, def: OUTFITS_BY_ID[o.outfitId], free: freeEngineUseSpaces(ship.value!, o.uid).length })),
+		.map((o) => ({
+			uid: o.uid,
+			def: OUTFITS_BY_ID[o.outfitId],
+			free: freeEngineUseSpaces(ship.value!, o.uid).length,
+			gts: engineRollResult(ship.value!, o.uid, 1, 99).gts,
+		})),
 );
 
 /** Sides of my sector with an unexplored edge next to my ship, for Scan Sector. */
@@ -104,7 +109,7 @@ watch(
 				@click="emit('act', 'fireEngine', e.uid)"
 			>
 				<span>Fire {{ e.def.name }}</span>
-				<span class="text-sky-300">roll {{ e.def.die }}</span>
+				<span class="text-sky-300">roll {{ e.def.die }}<template v-if="e.gts"> +{{ 2 * e.gts }}</template></span>
 			</button>
 			<p v-if="!engines.length" class="text-xs text-slate-500">No engines fitted — impulse is your only movement.</p>
 			<p v-else class="text-xs text-slate-500">

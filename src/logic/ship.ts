@@ -89,6 +89,39 @@ export function applyDamage(state: ShipState, kind: DamageKind, cell: string): s
 	return cube?.color ?? null;
 }
 
+/** Cells with damage of either kind (ice damage has the same effects, rulebook p14). */
+export function damagedCells(state: ShipState): Set<string> {
+	return new Set([...state.damage, ...state.iceDamage]);
+}
+
+/**
+ * Engine roll (rulebook p8, p28): the die result, -1 per damage on the engine (never
+ * below 1), then +2 for each undamaged GTS mod orthogonally next to the engine, but
+ * never above the die's maximum.
+ */
+export function engineRollResult(state: ShipState, uid: string, roll: number, dieMax: number): { result: number; penalty: number; gts: number } {
+	const engine = state.outfits.find((o) => o.uid === uid);
+	if (!engine) return { result: roll, penalty: 0, gts: 0 };
+	const damaged = damagedCells(state);
+	const cells = placedCells(engine);
+	const penalty = cells.filter((c) => damaged.has(cellKey(c.x, c.y))).length;
+	const engineKeys = new Set(cells.map((c) => cellKey(c.x, c.y)));
+	const gts = state.outfits.filter((o) => {
+		if (o.outfitId !== 'gts') return false;
+		const [cell] = placedCells(o);
+		const key = cellKey(cell.x, cell.y);
+		if (damaged.has(key)) return false;
+		return [
+			[1, 0],
+			[-1, 0],
+			[0, 1],
+			[0, -1],
+		].some(([dx, dy]) => engineKeys.has(cellKey(cell.x + dx, cell.y + dy)));
+	}).length;
+	const result = Math.min(dieMax, Math.max(1, roll - penalty) + 2 * gts);
+	return { result, penalty, gts };
+}
+
 /** Stranded: no energy and no armed markers (rulebook p4). */
 export function isStranded(state: ShipState): boolean {
 	return state.energy <= 0 && state.armedMarkers <= 0;

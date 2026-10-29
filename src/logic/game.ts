@@ -26,7 +26,7 @@ import {
 	unexploredEdges,
 } from './board';
 import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
-import { applyDamage, cargoTargets, createShipState, damageTargets, maxDamage, shipDef, totalDamage } from './ship';
+import { applyDamage, cargoTargets, createShipState, damagedCells, damageTargets, engineRollResult, maxDamage, shipDef, totalDamage } from './ship';
 import {
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
@@ -165,7 +165,7 @@ function placementArgs(args: unknown[]): { x: number; y: number; rotation: Rotat
 export function freeEngineUseSpaces(ship: ShipState, uid: string): number[] {
 	const o = ship.outfits.find((x) => x.uid === uid);
 	if (!o || OUTFITS_BY_ID[o.outfitId].type !== 'engine') return [];
-	const damaged = new Set(ship.damage);
+	const damaged = damagedCells(ship);
 	return placedCells(o)
 		.filter((c) => c.kind === 'U' && !o.usedSpaces.includes(c.useIndex) && !damaged.has(cellKey(c.x, c.y)))
 		.map((c) => c.useIndex);
@@ -534,13 +534,13 @@ const moves = {
 		const def = OUTFITS_BY_ID[o.outfitId];
 		o.usedSpaces.push(freeEngineUseSpaces(ship, uid)[0]);
 		ship.armedMarkers--;
-		const damaged = new Set(ship.damage);
-		const penalty = placedCells(o).filter((c) => damaged.has(cellKey(c.x, c.y))).length;
-		const roll = random.Die(DIE_SIDES[def.die!]);
-		const result = Math.max(1, roll - penalty);
+		const sides = DIE_SIDES[def.die!];
+		const roll = random.Die(sides);
+		const { result, penalty, gts } = engineRollResult(ship, uid, roll, sides);
 		const lost = G.turn.movement;
 		G.turn.movement = result;
-		log(G, playerID, `fired the ${def.name}: rolled ${roll}${penalty ? ` −${penalty} damage` : ''} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
+		const mods = `${penalty ? ` −${penalty} damage` : ''}${gts ? ` +${2 * gts} GTS` : ''}`;
+		log(G, playerID, `fired the ${def.name}: rolled ${roll}${mods} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 
 	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string) => {
