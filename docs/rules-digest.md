@@ -1,6 +1,6 @@
 # Xia rules digest
 
-A condensed summary of the reworked rulebook (v1.35, including Embers rule changes), written for implementing the game. Page numbers refer to that PDF.
+A condensed summary of the reworked rulebook (v1.35, including Embers rule changes), written for implementing the game. Page numbers refer to that PDF, kept at `docs/Xia_Rulebook_mz.pdf` (not under `public/`, so the app never serves it).
 Expansion tags: **[E]** Embers, **[MP]** Missions and Powers, **[KS]** Kickstarter/Sellsword. Untagged rules are base game.
 
 ## Scope decisions (2026-10-28)
