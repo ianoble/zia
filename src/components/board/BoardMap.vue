@@ -6,7 +6,7 @@ import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex } from '../../lo
 
 /**
  * The drift system: sectors of 19 flat-top hexes (geometry from sector_19_spaces.svg,
- * hex radius 100). Drag to pan, scroll to zoom. Ships are coloured tokens.
+ * hex radius 100). Drag to pan; zoom with the +/- buttons. Ships are coloured tokens.
  */
 export interface BoardShip {
 	seat: string;
@@ -57,10 +57,35 @@ const sectorEdges = computed(() => {
 	return lines;
 });
 
+/** Red outline around star regions (like the printed Nyr tile). */
+const starEdges = computed(() => {
+	const all = boardHexes(props.board);
+	const lines: { x1: number; y1: number; x2: number; y2: number }[] = [];
+	for (const h of hexes.value) {
+		if (h.kind !== 'star') continue;
+		const corners = hexCorners(h.x, h.y, SIZE);
+		HEX_DIRECTIONS.forEach((d, i) => {
+			if (all.get(hexKey(addHex(h.hex, d)))?.kind === 'star') return;
+			const a = corners[i];
+			const b = corners[(i + 1) % 6];
+			lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+		});
+	}
+	return lines;
+});
+
+/** Star hexes fully surrounded by star (the centre of each star region), for the glow. */
+const starCenters = computed(() => {
+	const all = boardHexes(props.board);
+	return hexes.value.filter(
+		(h) => h.kind === 'star' && HEX_DIRECTIONS.every((d) => all.get(hexKey(addHex(h.hex, d)))?.kind === 'star'),
+	);
+});
+
 const sectorLabels = computed(() =>
 	props.board.sectors.map((s, i) => {
 		const { x, y } = hexToPixel(s.center, SIZE);
-		return { i, x, y: y - SIZE * 4.7, name: SECTORS_BY_ID[s.tileId]?.name ?? s.tileId };
+		return { i, x, y: y - SIZE * Math.sqrt(3) * 2 - 18, name: SECTORS_BY_ID[s.tileId]?.name ?? s.tileId };
 	}),
 );
 
@@ -80,7 +105,14 @@ const fitBox = computed(() => {
 	const minY = Math.min(...ys) - pad;
 	return { x: minX, y: minY, w: Math.max(...xs) + pad - minX, h: Math.max(...ys) + pad - minY };
 });
-const zoom = ref(1);
+/** Fixed zoom steps for the +/- buttons. */
+const ZOOM_LEVELS = [0.6, 0.8, 1, 1.25, 1.6, 2, 2.5];
+const zoomIndex = ref(ZOOM_LEVELS.indexOf(1));
+const zoom = computed(() => ZOOM_LEVELS[zoomIndex.value]);
+const canZoomIn = computed(() => zoomIndex.value < ZOOM_LEVELS.length - 1);
+const canZoomOut = computed(() => zoomIndex.value > 0);
+const zoomIn = () => canZoomIn.value && zoomIndex.value++;
+const zoomOut = () => canZoomOut.value && zoomIndex.value--;
 const pan = ref({ x: 0, y: 0 });
 const viewBox = computed(() => {
 	const f = fitBox.value;
@@ -115,14 +147,6 @@ function onPointerMove(e: PointerEvent) {
 function onPointerUp() {
 	setTimeout(() => (drag = null));
 }
-function onWheel(e: WheelEvent) {
-	e.preventDefault();
-	zoom.value = Math.min(4, Math.max(0.5, zoom.value * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-}
-function resetView() {
-	zoom.value = 1;
-	pan.value = { x: 0, y: 0 };
-}
 function onHexClick(key: string) {
 	if (drag?.moved) return;
 	emit('hexClick', key);
@@ -140,17 +164,37 @@ function onHexClick(key: string) {
 			@pointermove="onPointerMove"
 			@pointerup="onPointerUp"
 			@pointerleave="onPointerUp"
-			@wheel="onWheel"
 		>
+			<defs>
+				<radialGradient id="starGlow">
+					<stop offset="0%" stop-color="#ffcf6b" stop-opacity="0.85" />
+					<stop offset="45%" stop-color="#ff8a2a" stop-opacity="0.45" />
+					<stop offset="100%" stop-color="#ff5a1f" stop-opacity="0" />
+				</radialGradient>
+			</defs>
+
 			<!-- Spaces -->
 			<g v-for="h in hexes" :key="h.key" :data-hex="h.key" class="hex" :class="{ reachable: reachable?.has(h.key) }" @click="onHexClick(h.key)">
-				<polygon :points="h.points" class="hex-shape" />
+				<polygon :points="h.points" class="hex-shape" :class="{ 'star-hex': h.kind === 'star' }" />
 				<g v-if="h.kind === 'spawn'" class="spawn">
 					<circle :cx="h.x" :cy="h.y" r="46" />
 					<text :x="h.x" :y="h.y + 13" text-anchor="middle">⟳</text>
 				</g>
 				<text v-if="reachable?.has(h.key)" :x="h.x" :y="h.y + 78" text-anchor="middle" class="cost">{{ reachable.get(h.key) }}</text>
 			</g>
+
+			<!-- Stars -->
+			<circle v-for="c in starCenters" :key="`star${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 1.9" class="star-glow" />
+			<circle v-for="c in starCenters" :key="`core${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 0.75" class="star-core" />
+			<line
+				v-for="(l, i) in starEdges"
+				:key="`se${i}`"
+				:x1="l.x1"
+				:y1="l.y1"
+				:x2="l.x2"
+				:y2="l.y2"
+				class="star-edge"
+			/>
 
 			<!-- Sector outlines -->
 			<line
@@ -172,7 +216,10 @@ function onHexClick(key: string) {
 				<text y="16" text-anchor="middle" class="ship-label">{{ s.label }}</text>
 			</g>
 		</svg>
-		<button type="button" class="reset" title="Reset view" @click="resetView">⤢</button>
+		<div class="zoom-controls">
+			<button type="button" title="Zoom in" aria-label="Zoom in" :disabled="!canZoomIn" @click="zoomIn">+</button>
+			<button type="button" title="Zoom out" aria-label="Zoom out" :disabled="!canZoomOut" @click="zoomOut">−</button>
+		</div>
 	</div>
 </template>
 
@@ -181,7 +228,6 @@ function onHexClick(key: string) {
 	position: relative;
 	width: 100%;
 	height: 100%;
-	min-height: 420px;
 	border-radius: 0.75rem;
 	overflow: hidden;
 	background:
@@ -225,6 +271,27 @@ function onHexClick(key: string) {
 	fill: #9fe3ff;
 	pointer-events: none;
 }
+.hex-shape.star-hex,
+.hex:hover .hex-shape.star-hex {
+	fill: #3a1d10;
+	stroke: #7a3b1c;
+	cursor: not-allowed;
+}
+.star-glow {
+	fill: url(#starGlow);
+	pointer-events: none;
+}
+.star-core {
+	fill: #ffe9a8;
+	filter: drop-shadow(0 0 24px #ffb02e);
+	pointer-events: none;
+}
+.star-edge {
+	stroke: #e5483a;
+	stroke-width: 9;
+	stroke-linecap: round;
+	pointer-events: none;
+}
 .spawn circle {
 	fill: none;
 	stroke: #f2c230;
@@ -243,7 +310,7 @@ function onHexClick(key: string) {
 	pointer-events: none;
 }
 .sector-label {
-	font-size: 46px;
+	font-size: 30px;
 	font-weight: 800;
 	fill: #c9d4ff88;
 	letter-spacing: 0.05em;
@@ -271,15 +338,33 @@ function onHexClick(key: string) {
 	stroke-width: 6;
 	paint-order: stroke;
 }
-.reset {
+.zoom-controls {
 	position: absolute;
 	right: 0.6rem;
 	bottom: 0.6rem;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	border-radius: 0.5rem;
+	border: 1px solid #475569;
+	background: #1e293bcc;
+}
+.zoom-controls button {
 	width: 2.2rem;
 	height: 2.2rem;
-	border-radius: 0.5rem;
-	background: #1e293bcc;
-	border: 1px solid #475569;
+	font-size: 1.25rem;
+	font-weight: 700;
+	line-height: 1;
 	color: #e2e8f0;
+}
+.zoom-controls button + button {
+	border-top: 1px solid #475569;
+}
+.zoom-controls button:hover:not(:disabled) {
+	background: #334155;
+}
+.zoom-controls button:disabled {
+	opacity: 0.35;
+	cursor: not-allowed;
 }
 </style>

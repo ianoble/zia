@@ -7,7 +7,8 @@ Expansion tags: **[E]** Embers, **[MP]** Missions and Powers, **[KS]** Kickstart
 - **Content:** base game + Embers of a Forsaken Star. Missions and Powers [MP], Kickstarter/Sellsword [KS] and the Embers solo variant are out of scope, so their rules below can be ignored for now.
 - **Players:** 2–5. The 2-player variant applies at 2: NPCs count as players for mission targets, and the Lone Drifter auto-pilot gets +2 movement.
 - **NPCs** (Enforcer, Scoundrel, Merchant) are run automatically by the server. When the rules leave a choice to the controlling captain (e.g. ties between equally direct paths), the game prompts the active player to choose. The Kiln is an NPC card, but it has no turns.
-- **Starting sectors:** placed automatically around the first (centre) tile, each one edge-matching its symbol with the centre tile. Until tiles have edge symbols, placeholders are placed without matching.
+- **Starting sectors:** Nyr in the centre; starting sectors in the rulebook's "Setup using Nyr" positions (p3): 3 players W, NE, SE; 4 players W, NW, E, SE; 5 players W, NW, NE, E, SE. No 2-player diagram, so W and E for now. Captains get sectors in seat order.
+- **Edge symbols:** every sector tile has the same six edge symbols in the same positions and order (as on Nyr). When a tile is placed, only the edge the ship left through has to match, with the same symbol on both sides. So a new tile always sits turned 180° from the tile it attaches to (`matchedRotation` in board.ts), and tile data doesn't need per-tile edge symbols.
 - **During play (for now):** captains can only move (impulse, engines). Buying, selling and everything else waits until real sectors with planets exist.
 - **Open question:** at 2 players there are 3 NPC cards but only 2 captains. Which captain's turn does the third NPC's turn follow? Proposed: deal NPCs to seats in order, wrapping around, so seat 0 runs 2 NPCs.
 

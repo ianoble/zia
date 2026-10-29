@@ -350,6 +350,22 @@ async function abandonGame(matchID: string) {
 			}),
 		});
 		if (!res.ok) throw new Error("Server rejected leave request");
+
+		const botCredsKey = `bgf:bots:${gameDef.id}:${matchID}`;
+		const botCreds = JSON.parse(localStorage.getItem(botCredsKey) || "{}");
+		const botPlayerIDs = Object.keys(botCreds);
+		if (botPlayerIDs.length > 0) {
+			for (const botPid of botPlayerIDs) {
+				try {
+					await fetch(`${SERVER_URL}/games/${gameDef.id}/${matchID}/leave`, {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ playerID: botPid, credentials: botCreds[botPid] }),
+					});
+				} catch { /* best effort */ }
+			}
+			localStorage.removeItem(botCredsKey);
+		}
 	} catch {
 		// Even if the server call fails, clean up locally
 	}
@@ -384,6 +400,78 @@ async function pollHostedMatch(matchID: string) {
 const allSeatsFilled = computed(() => hostedPlayers.value.length > 0 && hostedPlayers.value.every((p) => p.name));
 
 const filledCount = computed(() => hostedPlayers.value.filter((p) => p.name).length);
+
+const fillingBots = ref(false);
+
+/** First lobby colour no seat has taken yet (bots get one so colours never clash). */
+function nextFreeColor(players: MatchPlayer[], alsoTaken: string[]): PlayerColor | undefined {
+	const taken = new Set([...players.map((p) => p.data?.color).filter(Boolean), ...alsoTaken] as string[]);
+	return PLAYER_COLORS.find((c) => !taken.has(c));
+}
+
+function saveBotCredentials(mID: string, playerID: string, credentials: string) {
+	const key = `bgf:bots:${gameDef.id}:${mID}`;
+	const existing = JSON.parse(localStorage.getItem(key) || "{}");
+	existing[playerID] = credentials;
+	localStorage.setItem(key, JSON.stringify(existing));
+}
+
+async function fillWithBots() {
+	if (!hostedMatchID.value) return;
+	fillingBots.value = true;
+	errorMsg.value = "";
+
+	try {
+		const emptySeats = hostedPlayers.value.filter((p) => !p.name);
+		const usedColors: string[] = [];
+		for (let i = 0; i < emptySeats.length; i++) {
+			const seatID = String(emptySeats[i].id);
+			const botName = `Bot ${emptySeats[i].id}`;
+			const color = nextFreeColor(hostedPlayers.value, usedColors);
+			if (color) usedColors.push(color);
+			const res = await fetch(`${SERVER_URL}/games/${gameDef.id}/${hostedMatchID.value}/join`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ playerID: seatID, playerName: botName, data: { color } }),
+			});
+			if (!res.ok) throw new Error(`Failed to seat ${botName}`);
+			const { playerCredentials } = (await res.json()) as { playerCredentials: string };
+			saveBotCredentials(hostedMatchID.value, seatID, playerCredentials);
+		}
+		await pollHostedMatch(hostedMatchID.value);
+	} catch (e: unknown) {
+		errorMsg.value = e instanceof Error ? e.message : "Failed to fill bots";
+	} finally {
+		fillingBots.value = false;
+	}
+}
+
+async function fillBotsForGame(matchID: string) {
+	errorMsg.value = "";
+	try {
+		const match = await fetchMatch(matchID);
+		if (!match) throw new Error("Match not found");
+
+		const emptySeats = match.players.filter((p) => !p.name);
+		const usedColors: string[] = [];
+		for (const seat of emptySeats) {
+			const seatID = String(seat.id);
+			const color = nextFreeColor(match.players, usedColors);
+			if (color) usedColors.push(color);
+			const res = await fetch(`${SERVER_URL}/games/${gameDef.id}/${matchID}/join`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ playerID: seatID, playerName: `Bot ${seatID}`, data: { color } }),
+			});
+			if (!res.ok) throw new Error(`Failed to seat Bot ${seatID}`);
+			const { playerCredentials } = (await res.json()) as { playerCredentials: string };
+			saveBotCredentials(matchID, seatID, playerCredentials);
+		}
+		await refreshData();
+	} catch (e: unknown) {
+		errorMsg.value = e instanceof Error ? e.message : "Failed to add bots";
+	}
+}
 
 function inviteLink(): string {
 	if (!hostedMatchID.value) return "";
@@ -699,6 +787,13 @@ onUnmounted(stopPolling);
 										Resume
 									</button>
 									<button
+										v-if="matchStatus(game) === 'waiting' && game.myPlayerID === '0'"
+										class="flex-1 px-3 py-2 text-xs font-medium text-slate-400 hover:bg-slate-700/50 transition-colors"
+										@click="fillBotsForGame(game.matchID)"
+									>
+										Add Bots
+									</button>
+									<button
 										v-if="game.myPlayerID === '0'"
 										class="flex-1 px-3 py-2 text-xs font-medium text-red-400/70 hover:bg-red-900/20 hover:text-red-400 transition-colors"
 										@click="abandonGame(game.matchID)"
@@ -800,6 +895,13 @@ onUnmounted(stopPolling);
 					</button>
 
 					<div v-if="!allSeatsFilled" class="flex gap-2">
+						<button
+							class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-sm text-slate-400 hover:text-white font-medium transition-colors disabled:opacity-50"
+							:disabled="fillingBots"
+							@click="fillWithBots"
+						>
+							{{ fillingBots ? "Adding..." : "Fill with Bots" }}
+						</button>
 						<button
 							class="flex-1 py-2.5 bg-slate-800 hover:bg-red-900/40 border border-slate-700 hover:border-red-800 rounded-lg text-sm text-slate-400 hover:text-red-400 font-medium transition-colors"
 							@click="abandonHostedGame"

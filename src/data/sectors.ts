@@ -7,7 +7,7 @@
  */
 import type { Axial } from '../logic/hex';
 
-export type SpaceKind = 'spawn';
+export type SpaceKind = 'spawn' | 'star';
 
 export interface SectorSpace {
 	at: Axial;
@@ -30,4 +30,30 @@ export const PLACEHOLDER_SECTORS: SectorTileDef[] = [1, 2, 3, 4, 5].map((n) => (
 	placeholder: true,
 }));
 
-export const SECTORS_BY_ID: Record<string, SectorTileDef> = Object.fromEntries(PLACEHOLDER_SECTORS.map((s) => [s.id, s]));
+/** Centre hex plus its six neighbours (local coordinates). */
+const INNER_SEVEN: Axial[] = [
+	{ q: 0, r: 0 },
+	{ q: 1, r: 0 },
+	{ q: 0, r: 1 },
+	{ q: -1, r: 1 },
+	{ q: -1, r: 0 },
+	{ q: 0, r: -1 },
+	{ q: 1, r: -1 },
+];
+
+/**
+ * [Embers] Nyr: always placed in the centre of the table at setup; every captain's
+ * starting sector connects to it. The inner 7 hexes are the star (can't be entered
+ * or crossed). The outer ring of 12 is The Kiln's orbit path, travelled clockwise
+ * (The Kiln token, docking and orbit movement come later).
+ */
+export const NYR_SECTOR: SectorTileDef = {
+	id: 'nyr',
+	name: 'Nyr',
+	spaces: INNER_SEVEN.map((at) => ({ at, kind: 'star' as const })),
+	placeholder: true,
+};
+
+export const SECTORS_BY_ID: Record<string, SectorTileDef> = Object.fromEntries(
+	[NYR_SECTOR, ...PLACEHOLDER_SECTORS].map((s) => [s.id, s]),
+);

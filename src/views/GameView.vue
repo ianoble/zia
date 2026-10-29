@@ -5,6 +5,7 @@ import { gameDef, reachableHexes } from '../logic/index';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { useMatchPlayers } from '../composables/useMatchPlayers';
+import { useBotPlayers } from '../composables/useBotPlayers';
 import BoardMap, { type BoardShip } from '../components/board/BoardMap.vue';
 import ShipMat from '../components/ship/ShipMat.vue';
 import { PLAYER_HEX } from '../components/ship/shipMatTheme';
@@ -18,6 +19,7 @@ const props = defineProps<{ matchID: string; playerID: string }>();
 const game = useGame<ZiaState>();
 const { isConnected, isMyTurn, gameover, reconnecting, connect, disconnect, state, currentPlayer, move } = game;
 const { nameOf, seats } = useMatchPlayers(toRef(props, 'matchID'));
+useBotPlayers(toRef(props, 'matchID'), toRef(props, 'playerID'));
 
 const { requestPermission, permission, supported } = useTurnNotifications({
 	displayName: gameDef.displayName,
@@ -62,7 +64,7 @@ const boardShips = computed<BoardShip[]>(() =>
 			seat: p.id,
 			position: p.position!,
 			color: colorOf(p.id),
-			label: (nameOf(p.id) || '?').slice(0, 1).toUpperCase(),
+			label: (nameOf(p.id) || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase(),
 			active: p.id === currentPlayer.value && stage.value === 'play',
 		})),
 );
@@ -136,14 +138,57 @@ onUnmounted(() => disconnect());
 		<div v-if="!loaded" class="flex min-h-[60vh] items-center justify-center text-slate-500">{{ statusMessage }}</div>
 
 		<template v-else-if="G">
-			<div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-				<!-- Board -->
-				<section class="h-[58vh] min-h-[420px]">
-					<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" @hex-click="onHexClick" />
+			<div class="grid items-start gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+				<!-- Left: board, then the ship mat / setup step directly underneath -->
+				<div class="min-w-0 space-y-4">
+					<section class="h-[52vh] min-h-[380px]">
+						<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" @hex-click="onHexClick" />
+					</section>
+
+				<!-- Stage content -->
+				<section class="pb-8">
+					<ShipPicker v-if="stage === 'pickShip'" :G="G" :my-turn="isMyTurn" :name-of="nameOf" :color-of="colorOf" @pick="(id, ab) => act('pickShip', id, ab)" />
+
+					<OutfitShop
+						v-else-if="stage === 'outfit' && G.players[playerID].ship"
+						:G="G"
+						:player-i-d="playerID"
+						:current-player="currentPlayer"
+						:color="playerColor(playerID)"
+						:captain-name="nameOf(playerID)"
+						@act="act"
+					/>
+
+					<div v-else-if="stage === 'play'" class="space-y-3">
+						<div class="flex flex-wrap gap-2">
+							<button
+								v-for="p in captainsWithShips"
+								:key="p.id"
+								type="button"
+								class="rounded-lg border px-3 py-1.5 text-sm"
+								:class="viewedSeat === p.id ? 'border-sky-500 bg-sky-950/60' : 'border-slate-700 bg-slate-900 hover:border-slate-500'"
+								@click="viewedSeat = p.id"
+							>
+								<span class="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" :style="{ background: colorOf(p.id) }" />
+								{{ p.id === playerID ? 'Your ship' : nameOf(p.id) }}
+							</button>
+						</div>
+						<ShipMat
+							v-if="viewedShip"
+							:state="viewedShip"
+							:color="playerColor(viewedSeat)"
+							:bounty="G.players[viewedSeat].bounty"
+							:captain-name="nameOf(viewedSeat)"
+							:can-impulse="viewedSeat === playerID && isMyTurn && viewedShip.impulseReady"
+							@impulse="act('useImpulse')"
+						/>
+					</div>
 				</section>
+				</div>
 
 				<!-- Sidebar -->
-				<aside class="flex flex-col gap-3">
+				<!-- Sidebar stays in view while scrolling -->
+				<aside class="flex flex-col gap-3 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
 					<div class="rounded-lg border border-slate-800 bg-slate-900/60">
 						<h3 class="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
 							Captains {{ stage === 'play' ? '(turn order)' : '(pick order)' }}
@@ -186,45 +231,6 @@ onUnmounted(() => disconnect());
 				</aside>
 			</div>
 
-			<!-- Stage content -->
-			<section class="px-4 pb-8">
-				<ShipPicker v-if="stage === 'pickShip'" :G="G" :my-turn="isMyTurn" :name-of="nameOf" :color-of="colorOf" @pick="(id, ab) => act('pickShip', id, ab)" />
-
-				<OutfitShop
-					v-else-if="stage === 'outfit' && G.players[playerID].ship"
-					:G="G"
-					:player-i-d="playerID"
-					:current-player="currentPlayer"
-					:color="playerColor(playerID)"
-					:captain-name="nameOf(playerID)"
-					@act="act"
-				/>
-
-				<div v-else-if="stage === 'play'" class="space-y-3">
-					<div class="flex flex-wrap gap-2">
-						<button
-							v-for="p in captainsWithShips"
-							:key="p.id"
-							type="button"
-							class="rounded-lg border px-3 py-1.5 text-sm"
-							:class="viewedSeat === p.id ? 'border-sky-500 bg-sky-950/60' : 'border-slate-700 bg-slate-900 hover:border-slate-500'"
-							@click="viewedSeat = p.id"
-						>
-							<span class="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" :style="{ background: colorOf(p.id) }" />
-							{{ p.id === playerID ? 'Your ship' : nameOf(p.id) }}
-						</button>
-					</div>
-					<ShipMat
-						v-if="viewedShip"
-						:state="viewedShip"
-						:color="playerColor(viewedSeat)"
-						:bounty="G.players[viewedSeat].bounty"
-						:captain-name="nameOf(viewedSeat)"
-						:can-impulse="viewedSeat === playerID && isMyTurn && viewedShip.impulseReady"
-						@impulse="act('useImpulse')"
-					/>
-				</div>
-			</section>
 		</template>
 	</div>
 </template>

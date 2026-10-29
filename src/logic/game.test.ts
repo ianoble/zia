@@ -27,7 +27,8 @@ describe('setup state', () => {
 		expect(G.players['0'].credits).toBe(STARTING_CREDITS);
 		const rolls = Object.values(G.players).map((p) => p.initiativeRoll);
 		expect(new Set(rolls).size).toBe(3);
-		expect(G.board.sectors).toHaveLength(3);
+		expect(G.board.sectors).toHaveLength(4); // Nyr + one per captain
+		expect(G.board.sectors[0].tileId).toBe('nyr');
 	});
 
 	it('orders picks highest first, counter-clockwise; last picker plays first, clockwise', () => {

@@ -334,6 +334,7 @@ const moves = {
 		const cost = reachableHexes(G.board, p.position!, G.turn.movement, occupiedHexes(G, playerID)).get(target)!;
 		p.position = target;
 		G.turn.movement -= cost;
+		log(G, playerID, `moved ${cost} space${cost === 1 ? '' : 's'}`);
 	}),
 
 	/** Status Phase (simplified): refresh impulse & ability, arm markers for 1 energy each, end the turn. */
