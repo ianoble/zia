@@ -9,7 +9,7 @@
  *   A asteroid   D debris   N nebula   G gate
  *   H harvest   V salvage   X mining
  *
- * Not transcribed yet: planetary entrances (the dashed part of a shield).
+ * Planetary entrances (the dashed part of a shield) are in PLANET_ENTRANCES.
  */
 import type { Axial } from '../logic/hex';
 
@@ -37,6 +37,24 @@ export const TILE_LAYOUTS: Record<number, [string, string, string, string, strin
 	18: ['AE A S', '. . A .', '. A P PM A', '. P P A', 'A PB A'], // Smugglers' Den
 	19: ['D D D', 'D . . .', '. . G G S', '. D G .', 'D M D'], // Tigris Gate
 	24: ['. . .', '. . . .', '. . . . .', '. . . .', '. . .'], // Lost Sector (void)
+};
+
+/** Hex sides of a flat-top hex, as HEX_DIRECTIONS indexes. */
+export const HEX_SIDE = { SE: 0, S: 1, SW: 2, NW: 3, N: 4, NE: 5 } as const;
+export type HexSide = keyof typeof HEX_SIDE;
+
+/**
+ * Which way each planet's entrance faces, by tile number (tile upright). The entrance is
+ * the single shield edge furthest out that way (see entranceEdge in sectors.ts).
+ * From the captain's notes; Loath's matches the photo. Smugglers' Den: not known yet.
+ */
+export const PLANET_ENTRANCES: Record<number, HexSide> = {
+	1: 'NW', // Neo Damascus
+	2: 'NW', // Kemplar II
+	3: 'NE', // Azure
+	4: 'NW', // Doravin V
+	5: 'NW', // Loath
+	6: 'NE', // Lunari
 };
 
 /** The hexes of a layout with their codes, in local coordinates. */

@@ -163,6 +163,18 @@ export function startingBoard(seats: string[], tileIds: string[] = STARTING_CAND
 	};
 }
 
+/** Planetary entrances on the board: board hex and HEX_DIRECTIONS side, keyed "q,r:dir". */
+export function planetEntrances(board: BoardState): Set<string> {
+	const out = new Set<string>();
+	for (const s of board.sectors) {
+		const e = SECTORS_BY_ID[s.tileId]?.entrance;
+		if (!e) continue;
+		const hex = addHex(s.center, rotateHex(e.at, s.rotation));
+		out.add(`${hexKey(hex)}:${(e.direction + s.rotation) % 6}`);
+	}
+	return out;
+}
+
 /** Kinds the rules act on so far, in priority order, for BoardHex.kind. */
 const PRIMARY_KINDS = ['star', 'spawn', 'exploration'] as const;
 export type PrimaryKind = (typeof PRIMARY_KINDS)[number];

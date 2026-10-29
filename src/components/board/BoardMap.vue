@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { SECTORS_BY_ID } from '../../data/sectors';
 import EdgeSymbolGlyph from './EdgeSymbolGlyph.vue';
-import { boardHexes, edgeSymbolMarks, type BoardState } from '../../logic/board';
+import { boardHexes, edgeSymbolMarks, planetEntrances, type BoardState } from '../../logic/board';
 import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex, parseHexKey } from '../../logic/hex';
 
 /**
@@ -62,6 +62,7 @@ function planetSide(sectorIndex: number): 'lawful' | 'outlaw' | 'neutral' {
  */
 const terrainEdges = computed(() => {
 	const all = boardHexes(props.board);
+	const entrances = planetEntrances(props.board);
 	const lines: { x1: number; y1: number; x2: number; y2: number; cls: string }[] = [];
 	for (const h of hexes.value) {
 		if (!h.terrain) continue;
@@ -74,7 +75,8 @@ const terrainEdges = computed(() => {
 			}
 			const a = corners[i];
 			const b = corners[(i + 1) % 6];
-			lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, cls });
+			const entrance = h.terrain === 'planet' && entrances.has(`${h.key}:${i}`);
+			lines.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, cls: entrance ? `${cls} entrance` : cls });
 		});
 	}
 	return lines;
@@ -438,6 +440,12 @@ function onHexClick(key: string) {
 }
 .edge-planet.outlaw {
 	stroke: #ff8a4c;
+}
+.terrain-edge.entrance {
+	stroke-width: 9;
+	stroke-dasharray: 8 9;
+	stroke-linecap: butt;
+	filter: drop-shadow(0 0 6px currentColor);
 }
 .edge-nebula {
 	stroke: #ec4fb4;

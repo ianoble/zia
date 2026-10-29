@@ -7,7 +7,7 @@
  * still have placeholder layouts. Edge symbols are the same on every tile (EDGE_SYMBOLS below).
  */
 import { hexesInRange, type Axial } from '../logic/hex';
-import { parseLayout, TILE_LAYOUTS, type LayoutCode } from './tileLayouts';
+import { HEX_SIDE, parseLayout, PLANET_ENTRANCES, TILE_LAYOUTS, type HexSide, type LayoutCode } from './tileLayouts';
 
 /**
  * What a space holds. A hex can have several (e.g. an exploration space in an asteroid,
@@ -91,6 +91,8 @@ export interface SectorTileDef {
 	spaces: SectorSpace[];
 	/** True until the tile's real hex layout (where each feature sits) is entered. */
 	layoutPlaceholder: boolean;
+	/** Planetary entrance: the shield edge on the `direction` side (HEX_DIRECTIONS index) of planet hex `at`. */
+	entrance?: { at: Axial; direction: number };
 }
 
 /** Centre hex plus its six neighbours (local coordinates). */
@@ -201,6 +203,41 @@ const CODE_KINDS: Record<LayoutCode, SpaceKind> = {
 	X: 'mine',
 };
 
+/**
+ * The planet shield edge furthest out on `side`: among planet hexes whose neighbour on
+ * that side isn't planet, the one furthest in that direction.
+ */
+export function entranceEdge(spaces: SectorSpace[], side: HexSide): { at: Axial; direction: number } | null {
+	const planet = spaces.filter((s) => s.kind === 'planet').map((s) => s.at);
+	const isPlanet = (q: number, r: number) => planet.some((a) => a.q === q && a.r === r);
+	const direction = HEX_SIDE[side];
+	const d = SIDE_OFFSETS[direction];
+	// Screen direction of that side (flat-top hexes): x = 1.5q, y = √3(r + q/2).
+	const dx = 1.5 * d.q;
+	const dy = Math.sqrt(3) * (d.r + d.q / 2);
+	let best: { at: Axial; direction: number } | null = null;
+	let bestScore = -Infinity;
+	for (const a of planet) {
+		if (isPlanet(a.q + d.q, a.r + d.r)) continue;
+		const score = 1.5 * a.q * dx + Math.sqrt(3) * (a.r + a.q / 2) * dy;
+		if (score > bestScore + 1e-9) {
+			best = { at: a, direction };
+			bestScore = score;
+		}
+	}
+	return best;
+}
+
+/** HEX_DIRECTIONS (copied to keep this data module free of logic imports). */
+const SIDE_OFFSETS: Axial[] = [
+	{ q: 1, r: 0 },
+	{ q: 0, r: 1 },
+	{ q: -1, r: 1 },
+	{ q: -1, r: 0 },
+	{ q: 0, r: -1 },
+	{ q: 1, r: -1 },
+];
+
 /** A transcribed layout from tileLayouts.ts, as spaces (the spawn point gets the tile's number). */
 function layoutSpaces(number: number, spawnPoint: number | undefined): SectorSpace[] | null {
 	const columns = TILE_LAYOUTS[number];
@@ -237,6 +274,12 @@ export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, short
 		layoutPlaceholder: !(number in KNOWN_LAYOUTS) && !(number in TILE_LAYOUTS),
 	};
 });
+
+for (const t of SECTOR_TILES) {
+	const side = PLANET_ENTRANCES[t.number];
+	const edge = side ? entranceEdge(t.spaces, side) : null;
+	if (edge) t.entrance = edge;
+}
 
 /**
  * [Embers] Nyr: always placed in the centre of the table at setup; every captain's

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NYR_SECTOR, SECTOR_TILES, SECTORS_BY_ID, STARTING_CANDIDATES } from './sectors';
-import { parseLayout, TILE_LAYOUTS } from './tileLayouts';
+import { parseLayout, PLANET_ENTRANCES, TILE_LAYOUTS } from './tileLayouts';
 import { SHIPS, IN_SCOPE_SHIPS } from './ships';
 import { OUTFITS } from './outfits';
 import { parseShape } from '../logic/holdGeometry';
@@ -90,5 +90,29 @@ describe('transcribed tile layouts', () => {
 		for (const s of tile.spaces.filter((x) => x.kind === 'buy' || x.kind === 'sell')) {
 			expect(tile.spaces.some((x) => x.kind === 'planet' && x.at.q === s.at.q && x.at.r === s.at.r)).toBe(true);
 		}
+	});
+});
+
+describe('planetary entrances', () => {
+	it.each(Object.keys(PLANET_ENTRANCES).map(Number))('tile %i has one on its shield', (n) => {
+		const tile = SECTOR_TILES.find((t) => t.number === n)!;
+		const e = tile.entrance!;
+		expect(e).toBeDefined();
+		const isPlanet = (q: number, r: number) => tile.spaces.some((s) => s.kind === 'planet' && s.at.q === q && s.at.r === r);
+		const d = [
+			[1, 0],
+			[0, 1],
+			[-1, 1],
+			[-1, 0],
+			[0, -1],
+			[1, -1],
+		][e.direction];
+		expect(isPlanet(e.at.q, e.at.r)).toBe(true);
+		expect(isPlanet(e.at.q + d[0], e.at.r + d[1])).toBe(false);
+	});
+
+	it("Loath's is the upper-left side of the planet hex left of centre (as in the photo); Azure's is up-right", () => {
+		expect(SECTORS_BY_ID['loath'].entrance).toEqual({ at: { q: -1, r: 0 }, direction: 3 });
+		expect(SECTORS_BY_ID['azure'].entrance).toEqual({ at: { q: 1, r: -1 }, direction: 5 });
 	});
 });

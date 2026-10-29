@@ -6,6 +6,7 @@ import {
 	edgeSymbolFacing,
 	edgeSymbolMarks,
 	explorePlacement,
+	planetEntrances,
 	matchedRotation,
 	movementCosts,
 	reachableHexes,
@@ -188,5 +189,14 @@ describe('edge symbols', () => {
 			sectorIndex: 2,
 			slot: SECTOR_SLOT.NE,
 		});
+	});
+});
+
+describe('planetary entrances on the board', () => {
+	it('turn with their tile', () => {
+		const at = (rotation: number) => [...planetEntrances({ sectors: [{ tileId: 'loath', center: { q: 0, r: 0 }, rotation }] })];
+		expect(at(0)).toEqual(['-1,0:3']);
+		// Turned 180°: the hex mirrors through the centre and the side flips.
+		expect(at(3)).toEqual(['1,0:0']);
 	});
 });
