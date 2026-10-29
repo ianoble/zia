@@ -261,6 +261,43 @@ export function movementCosts(board: BoardState, from: string, maxCost: number):
 	return costs;
 }
 
+/**
+ * The hexes a ship flies through from `from` to `to` (excluding `from`, including `to`),
+ * along a shortest path. Among equally short paths it takes the one through the most
+ * `prefer` hexes (face-down exploration tokens, which are collected on the way).
+ * Returns null if `to` is out of reach.
+ */
+export function movePath(board: BoardState, from: string, to: string, maxCost: number, prefer: Set<string> = new Set()): string[] | null {
+	const costs = movementCosts(board, from, maxCost);
+	const target = costs.get(to);
+	if (target == null) return null;
+	// Most preferred hexes on a shortest path to each hex, in order of cost.
+	const best = new Map<string, number>([[from, 0]]);
+	const byCost = [...costs.entries()].sort((a, b) => a[1] - b[1]);
+	for (const [key, cost] of byCost) {
+		if (key === from) continue;
+		let most = -1;
+		for (const n of hexNeighbors(parseHexKey(key))) {
+			const nk = hexKey(n);
+			if (costs.get(nk) === cost - 1) most = Math.max(most, best.get(nk) ?? -1);
+		}
+		best.set(key, most + (prefer.has(key) ? 1 : 0));
+	}
+	// Walk back from the target, always to a predecessor that keeps the best count.
+	const path = [to];
+	let key = to;
+	while (key !== from) {
+		const cost = costs.get(key)!;
+		const want = best.get(key)! - (prefer.has(key) ? 1 : 0);
+		const prev = hexNeighbors(parseHexKey(key))
+			.map(hexKey)
+			.find((nk) => costs.get(nk) === cost - 1 && best.get(nk) === want)!;
+		if (prev !== from) path.unshift(prev);
+		key = prev;
+	}
+	return path;
+}
+
 /** Hexes a ship can end its move on: within movement, not its own hex, not occupied. */
 export function reachableHexes(board: BoardState, from: string, movement: number, occupied: Set<string>): Map<string, number> {
 	const out = new Map<string, number>();

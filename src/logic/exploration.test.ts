@@ -3,7 +3,7 @@ import { Client } from 'boardgame.io/client';
 import type { Ctx } from 'boardgame.io';
 import { createInitialState, gameDef } from './index';
 import type { ZiaState } from './types';
-import { boardHexes, startingSpawnFor } from './board';
+import { boardHexes, movePath, startingBoard, startingSpawnFor } from './board';
 import { EMBERS_EXPLORATION_TOKENS, type ExplorationToken } from '../data/exploration';
 import { SECTORS_BY_ID } from '../data/sectors';
 import { SHIPS_BY_ID } from '../data/ships';
@@ -107,6 +107,18 @@ describe('collecting exploration tokens', () => {
 		expect(c.act('endTurn', 0)).toBe(true);
 	});
 
+	it('tokens on the way are collected without stopping, and the move carries on', () => {
+		const c = playClient(['movement', 'cargo-holo']);
+		c.act('useImpulse');
+		expect(c.act('moveShip', up(c.spawn, 2))).toBe(true);
+		const me = c.G().players[c.seat];
+		expect(me.position).toBe(up(c.spawn, 2));
+		expect(me.explorationTokens).toHaveLength(2);
+		expect(c.G().explorationSpaces).not.toContain(up(c.spawn));
+		expect(c.G().turn.movement).toBe(3 - 2 + 5);
+		expect(c.G().turn.explorationPairPending).toBe(true);
+	});
+
 	it('Captain in Need stays on the mat and does not count toward a pair', () => {
 		const c = playClient(['captain-in-need', 'movement']);
 		c.act('useImpulse');
@@ -114,5 +126,25 @@ describe('collecting exploration tokens', () => {
 		c.act('moveShip', up(c.spawn, 2));
 		expect(c.G().players[c.seat].explorationTokens).toHaveLength(2);
 		expect(c.G().turn.explorationPairPending).toBeFalsy();
+	});
+});
+
+describe('move routes', () => {
+	const board = startingBoard(['0', '1']);
+	const spawn = startingSpawnFor(board, '0')!;
+	const [q, r] = spawn.split(',').map(Number);
+
+	it('takes a shortest path', () => {
+		const path = movePath(board, spawn, `${q},${r - 2}`, 5)!;
+		expect(path).toHaveLength(2);
+		expect(path.at(-1)).toBe(`${q},${r - 2}`);
+		expect(movePath(board, spawn, `${q + 9},${r}`, 3)).toBeNull();
+	});
+
+	it('goes through face-down tokens when an equally short path can', () => {
+		// Two shortest paths to (q+1, r-2): via (q, r-1) or via (q+1, r-1).
+		const to = `${q + 1},${r - 2}`;
+		expect(movePath(board, spawn, to, 5, new Set([`${q},${r - 1}`]))).toEqual([`${q},${r - 1}`, to]);
+		expect(movePath(board, spawn, to, 5, new Set([`${q + 1},${r - 1}`]))).toEqual([`${q + 1},${r - 1}`, to]);
 	});
 });

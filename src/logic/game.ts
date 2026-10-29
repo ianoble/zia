@@ -16,6 +16,7 @@ import {
 	boardHexes,
 	dealStartingTiles,
 	explorePlacement,
+	movePath,
 	reachableHexes,
 	respawnHex,
 	SLOT_NAMES,
@@ -524,18 +525,25 @@ const moves = {
 
 	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string) => {
 		const p = G.players[playerID];
-		const cost = reachableHexes(G.board, p.position!, G.turn.movement, occupiedHexes(G, playerID)).get(target)!;
-		p.position = target;
-		G.turn.movement -= cost;
-		log(G, playerID, `moved ${cost} space${cost === 1 ? '' : 's'}`);
-		if (collectExplorationToken(G, playerID, target, random)) events.endTurn();
+		const path = movePath(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces))!;
+		G.turn.movement -= path.length;
+		log(G, playerID, `moved ${path.length} space${path.length === 1 ? '' : 's'}`);
+		// Collecting a token is a minor action: tokens on the way are flipped without stopping.
+		for (const hex of path) {
+			p.position = hex;
+			if (collectExplorationToken(G, playerID, hex, random)) {
+				events.endTurn();
+				return;
+			}
+		}
 	}),
 
 	/** Two face-up exploration tokens: discard both for 1 fame or 2,000 credits. */
 	claimExplorationPair: guarded('claimExplorationPair', ({ G, playerID }, choice: 'fame' | 'credits') => {
 		const p = G.players[playerID];
 		for (let n = 0; n < 2; n++) p.explorationTokens.splice(p.explorationTokens.findIndex((t) => t !== 'captain-in-need'), 1);
-		G.turn.explorationPairPending = false;
+		// More than one pair can be collected in a single move.
+		G.turn.explorationPairPending = pairableTokens(p.explorationTokens).length >= 2;
 		if (choice === 'fame') p.fame += EXPLORATION_PAIR_FAME;
 		else p.credits += EXPLORATION_PAIR_CREDITS;
 		log(G, playerID, `discarded two exploration tokens for ${choice === 'fame' ? '1 fame' : '2,000 credits'}`);
