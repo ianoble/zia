@@ -94,14 +94,24 @@ const starEdges = computed(() => {
 	return lines;
 });
 
-/** Centre of each star region for the glow: star hexes fully surrounded by star, or single-hex stars. */
-const starCenters = computed(() => {
-	const all = boardHexes(props.board);
-	return hexes.value.filter((h) => {
-		if (h.kind !== 'star') return false;
-		const starNeighbours = HEX_DIRECTIONS.filter((d) => all.get(hexKey(addHex(h.hex, d)))?.kind === 'star').length;
-		return starNeighbours === 6 || starNeighbours === 0;
-	});
+/**
+ * One glowing sun per star, sized to it: the star hexes of each sector, centred on their
+ * middle (Nyr's 7-hex star, Xia's whole tile).
+ */
+const starSuns = computed(() => {
+	const bySector = new Map<number, { x: number; y: number }[]>();
+	for (const h of hexes.value) {
+		if (h.kind !== 'star') continue;
+		const list = bySector.get(h.sectorIndex) ?? [];
+		list.push({ x: h.x, y: h.y });
+		bySector.set(h.sectorIndex, list);
+	}
+	return [...bySector.entries()].map(([sectorIndex, pts]) => ({
+		key: sectorIndex,
+		x: pts.reduce((a, p) => a + p.x, 0) / pts.length,
+		y: pts.reduce((a, p) => a + p.y, 0) / pts.length,
+		scale: Math.sqrt(pts.length / 7),
+	}));
 });
 
 /**
@@ -238,19 +248,6 @@ function onHexClick(key: string) {
 				<text :x="j.x" :y="j.y + 30" text-anchor="middle" class="jump-label">jump</text>
 			</g>
 
-			<!-- Stars -->
-			<circle v-for="c in starCenters" :key="`star${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 1.9" class="star-glow" />
-			<circle v-for="c in starCenters" :key="`core${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 0.75" class="star-core" />
-			<line
-				v-for="(l, i) in starEdges"
-				:key="`se${i}`"
-				:x1="l.x1"
-				:y1="l.y1"
-				:x2="l.x2"
-				:y2="l.y2"
-				class="star-edge"
-			/>
-
 			<!-- Sector outlines -->
 			<line
 				v-for="(l, i) in sectorEdges"
@@ -261,6 +258,20 @@ function onHexClick(key: string) {
 				:y2="l.y2"
 				class="sector-edge"
 			/>
+
+			<!-- Stars (red outline drawn over the sector outline) -->
+			<circle v-for="c in starSuns" :key="`star${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 1.9 * c.scale" class="star-glow" />
+			<circle v-for="c in starSuns" :key="`core${c.key}`" :cx="c.x" :cy="c.y" :r="SIZE * 0.75 * c.scale" class="star-core" />
+			<line
+				v-for="(l, i) in starEdges"
+				:key="`se${i}`"
+				:x1="l.x1"
+				:y1="l.y1"
+				:x2="l.x2"
+				:y2="l.y2"
+				class="star-edge"
+			/>
+
 			<!-- Edge symbols (glyphs point along +x, into the sector) -->
 			<g
 				v-for="m in symbolMarks"

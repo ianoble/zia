@@ -21,10 +21,10 @@ const note = ref('');
 /** Every exploration space shows a face-down token in the preview. */
 const tokens = computed(() => [...boardHexes(board.value).values()].filter((h) => h.kind === 'exploration').map((h) => h.key));
 
-// ?explore=1:NE,0:NE pre-explores from sector index through side, in order.
+// ?explore=1:NE,0:NE:xia pre-explores from sector index through side (optionally a given tile), in order.
 for (const step of (query.get('explore') ?? '').split(',').filter(Boolean)) {
-	const [index, side] = step.split(':');
-	exploreFrom(Number(index), SLOT_NAMES.indexOf(side.toUpperCase()));
+	const [index, side, tileId] = step.split(':');
+	exploreFrom(Number(index), SLOT_NAMES.indexOf(side.toUpperCase()), tileId);
 }
 
 function seatsFor(n: number) {
@@ -47,13 +47,13 @@ function onHexClick(key: string) {
 	note.value = 'No open side next to that hex.';
 }
 
-function exploreFrom(sectorIndex: number, slot: number): boolean {
+function exploreFrom(sectorIndex: number, slot: number, tileId?: string): boolean {
 	if (!board.value.sectors[sectorIndex] || slot < 0) return false;
 	const placed = explorePlacement(board.value, sectorIndex, slot);
 	if (!placed) return false;
 	const deck = startingDeck(board.value);
 	if (!deck.length) return false;
-	const tile = { id: deck[Math.floor(Math.random() * deck.length)] };
+	const tile = { id: tileId && deck.includes(tileId) ? tileId : deck[Math.floor(Math.random() * deck.length)] };
 	board.value = { sectors: [...board.value.sectors, { tileId: tile.id, ...placed }] };
 	note.value = `Explored from sector ${sectorIndex} through side ${SLOT_NAMES[slot]}; new tile turned ${placed.rotation * 60}°.`;
 	return true;

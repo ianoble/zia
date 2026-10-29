@@ -6,7 +6,6 @@ import type { ZiaState } from './types';
 import { boardHexes, dealStartingTiles, edgeSymbolFacing, reachableHexes, respawnHex, spawnPoints, startingBoard, startingDeck, unexploredEdges } from './board';
 import { SHIPS_BY_ID } from '../data/ships';
 import { SECTORS_BY_ID } from '../data/sectors';
-import { hexesInRange } from './hex';
 
 /** A 2-captain game past setup, with an optional fixed sector deck. Easy Tiger (impulse 3) moves first. */
 function playClient(deck?: string[]) {
@@ -138,9 +137,7 @@ describe('Blind Jump', () => {
 	});
 
 	it('into a star destroys the ship, ends the turn, and it respawns on its next turn', () => {
-		// Placeholder layouts keep stars in the middle of a tile, out of a jump's reach, so use an all-star test tile.
-		SECTORS_BY_ID['test-star'] = { ...SECTORS_BY_ID['xia'], id: 'test-star', spaces: hexesInRange({ q: 0, r: 0 }, 2).map((at) => ({ at, kind: 'star' as const })) };
-		const c = playClient(['test-star']);
+		const c = playClient(['xia']); // the whole Xia tile is star
 		const rim = flyToRim(c);
 		const { target } = unexploredEdges(c.G().board, rim)[0];
 		expect(c.act('blindJump', target)).toBe(true);

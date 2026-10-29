@@ -57,7 +57,10 @@ describe('sector tiles', () => {
 	it('Nyr and Xia are stars; gates have no exploration space', () => {
 		expect(NYR_SECTOR.number).toBe(28);
 		expect(SECTORS_BY_ID['xia'].types).toEqual(['Star']);
+		expect(SECTORS_BY_ID['xia'].spaces).toHaveLength(19); // the whole tile
 		expect(SECTORS_BY_ID['xia'].spaces.every((s) => s.kind === 'star')).toBe(true);
+		expect(SECTORS_BY_ID['xia'].layoutPlaceholder).toBe(false);
+		expect(NYR_SECTOR.spaces).toHaveLength(7);
 		for (const t of SECTOR_TILES.filter((x) => x.types.includes('Gate'))) expect(t.explorationSpaces).toBe(0);
 		expect(SECTORS_BY_ID['ferren-s-call'].explorationSpaces).toBe(2);
 		expect(SECTORS_BY_ID['tig'].types).toEqual(['Neutral', 'Anomaly']);

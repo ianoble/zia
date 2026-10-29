@@ -6,7 +6,7 @@
  * Hex layouts (where planets, borders, exploration spaces and mission points sit) are
  * still placeholders. Edge symbols are the same on every tile (EDGE_SYMBOLS below).
  */
-import type { Axial } from '../logic/hex';
+import { hexesInRange, type Axial } from '../logic/hex';
 
 export type SpaceKind = 'spawn' | 'star' | 'exploration';
 
@@ -155,6 +155,17 @@ function placeholderSpaces(types: SectorType[], spawnPoint: number | undefined, 
 	return spaces;
 }
 
+/**
+ * Real tile layouts, by tile number, as they're entered.
+ * - 20 Xia: the whole tile is the star. No space can be entered; a ship that Blind Jumps
+ *   into it is destroyed.
+ * - 28 Nyr: the inner 7 hexes are the star; the outer ring is The Kiln's orbit path.
+ */
+const KNOWN_LAYOUTS: Record<number, SectorSpace[]> = {
+	20: hexesInRange({ q: 0, r: 0 }, 2).map((at) => ({ at, kind: 'star' })),
+	28: INNER_SEVEN.map((at) => ({ at, kind: 'star' })),
+};
+
 /** Where placeholder exploration spaces go: just above, then just below, the centre. */
 const PLACEHOLDER_EXPLORATION_HEXES: Axial[] = [
 	{ q: 0, r: -1 },
@@ -175,8 +186,8 @@ export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, short
 		explorationSpaces: exploration,
 		missionPoints: missions,
 		features: features ? features.split(';').map((f) => f.trim()) : [],
-		spaces: placeholderSpaces(typeList, spawnPoint, exploration),
-		layoutPlaceholder: true,
+		spaces: KNOWN_LAYOUTS[number] ?? placeholderSpaces(typeList, spawnPoint, exploration),
+		layoutPlaceholder: !(number in KNOWN_LAYOUTS),
 	};
 });
 
