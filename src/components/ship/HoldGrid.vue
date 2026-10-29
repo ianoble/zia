@@ -1,4 +1,4 @@
-<script setup lang='ts'>
+<script setup lang="ts">
 import { computed } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
 import type { ShipDef } from '../../data/ships';
@@ -6,8 +6,25 @@ import { cellKey, hullCells, placedCells, type OccupiedCell } from '../../logic/
 import type { ShipState } from '../../logic/types';
 import { CONNECTOR_FILL, CUBE_FILL, OUTFIT_FILL } from './shipMatTheme';
 
-const props = defineProps<{ ship: ShipDef; state: ShipState; markerColor: string; interactive?: boolean }>();
-const emit = defineEmits<{ cellClick: [key: string] }>();
+export interface HoldGhost {
+	cells: { x: number; y: number; kind: string }[];
+	fill: string;
+	valid: boolean;
+}
+
+const props = defineProps<{
+	ship: ShipDef;
+	state: ShipState;
+	markerColor: string;
+	interactive?: boolean;
+	/** Outfit preview that follows the cursor while placing. */
+	ghost?: HoldGhost | null;
+	/** Extra empty cells around the hull (room for Cargo Pod / Armor Plating while placing). */
+	margin?: number;
+	/** Outfit to highlight (selected for moving/returning). */
+	selectedUid?: string | null;
+}>();
+const emit = defineEmits<{ cellClick: [key: string]; cellHover: [key: string | null] }>();
 
 interface OutfitCellView extends OccupiedCell {
 	fill: string;
@@ -73,9 +90,10 @@ const bounds = computed(() => {
 		xs.push(c.x);
 		ys.push(c.y);
 	}
-	const minX = Math.min(...xs);
-	const minY = Math.min(...ys);
-	return { minX, minY, cols: Math.max(...xs) - minX + 1, rows: Math.max(...ys) - minY + 1 };
+	const m = props.margin ?? 0;
+	const minX = Math.min(...xs) - m;
+	const minY = Math.min(...ys) - m;
+	return { minX, minY, cols: Math.max(...xs) + m - minX + 1, rows: Math.max(...ys) + m - minY + 1 };
 });
 
 const hullList = computed(() =>
@@ -94,6 +112,10 @@ const cargoAt = computed(() => new Map(props.state.cargo.map((c) => [c.cell, c.c
 const tokenCells = computed(() => {
 	const keys = new Set<string>(hull.value);
 	for (const c of outfitCells.value) keys.add(cellKey(c.x, c.y));
+	if (props.margin) {
+		const b = bounds.value;
+		for (let y = b.minY; y < b.minY + b.rows; y++) for (let x = b.minX; x < b.minX + b.cols; x++) keys.add(cellKey(x, y));
+	}
 	return [...keys].map((k) => {
 		const [x, y] = k.split(',').map(Number);
 		return { key: k, x, y, damage: damageSet.value.has(k), ice: iceSet.value.has(k), cargo: cargoAt.value.get(k) ?? null };
@@ -112,6 +134,7 @@ function onClick(key: string) {
 <template>
 	<div
 		class="hold"
+		@mouseleave="interactive && emit('cellHover', null)"
 		:style="{ width: `calc(${bounds.cols} * var(--cell))`, height: `calc(${bounds.rows} * var(--cell))` }"
 		:class="{ interactive }"
 	>
@@ -125,7 +148,7 @@ function onClick(key: string) {
 			v-for="c in outfitCells.filter((o) => !o.isOverlayMod)"
 			:key="`o${c.uid}${c.x},${c.y}`"
 			class="outfit-cell"
-			:class="{ exterior: c.kind === 'x' }"
+			:class="{ exterior: c.kind === 'x', selected: c.uid === selectedUid }"
 			:style="{
 				...pos(c.x, c.y),
 				'--fill': c.fill,
@@ -165,11 +188,23 @@ function onClick(key: string) {
 			:tabindex="interactive ? 0 : -1"
 			:aria-label="`Hold space ${t.key}`"
 			@click="onClick(t.key)"
+			@mouseenter="interactive && emit('cellHover', t.key)"
 		>
 			<span v-if="t.cargo" class="cube" :style="{ background: CUBE_FILL[t.cargo] }" :title="`${t.cargo} cube`" />
 			<span v-if="t.damage" class="damage" title="Damage" />
 			<span v-if="t.ice" class="ice" title="Ice damage" />
 		</button>
+
+		<!-- Placement preview -->
+		<div
+			v-for="(g, i) in ghost?.cells ?? []"
+			:key="`g${i}`"
+			class="ghost-cell"
+			:class="{ invalid: !ghost!.valid, exterior: g.kind === 'x' }"
+			:style="{ ...pos(g.x, g.y), '--fill': g.kind === 'C' ? CONNECTOR_FILL : ghost!.fill }"
+		>
+			<span v-if="g.kind === 'U'" class="use-space ghost-use" />
+		</div>
 	</div>
 </template>
 
@@ -196,6 +231,30 @@ function onClick(key: string) {
 	background: linear-gradient(160deg, #c9d3e6cc, #8796b0aa);
 	border: 1px solid #ffffff55;
 	box-shadow: inset 0 0 10px #0005;
+}
+.outfit-cell.selected {
+	outline: 3px solid #fff;
+	outline-offset: -3px;
+	filter: brightness(1.15);
+}
+.ghost-cell {
+	position: absolute;
+	width: var(--cell);
+	height: var(--cell);
+	z-index: 4;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--fill) 70%, transparent);
+	box-shadow: inset 0 0 0 3px #4ade80;
+}
+.ghost-cell.exterior {
+	background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--fill) 70%, transparent) 0 6px, transparent 6px 12px);
+}
+.ghost-cell.invalid {
+	box-shadow: inset 0 0 0 3px #f87171;
+	background: color-mix(in srgb, #f87171 35%, transparent);
+}
+.ghost-use {
+	opacity: 0.8;
 }
 .cube-slot {
 	position: absolute;

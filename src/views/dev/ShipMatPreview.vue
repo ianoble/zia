@@ -179,7 +179,7 @@ const galleryStates = computed(() => SHIPS.map((s) => ({ def: s, state: createSh
 					<label class="block text-slate-400">Bounty</label>
 					<input v-model.number="bounty" type="number" step="1000" min="0" class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5" />
 					<div class="flex flex-wrap gap-3">
-						<label class="flex items-center gap-1.5"><input v-model="state.impulseReady" type="checkbox" /> Impulse ready</label>
+						<label class="flex items-center gap-1.5"><input v-model="state.impulseReady" type="checkbox" /> Impulse ready (untick = flipped)</label>
 						<label class="flex items-center gap-1.5"><input v-model="state.abilityExhausted" type="checkbox" /> Ability exhausted</label>
 					</div>
 				</div>
@@ -216,7 +216,7 @@ const galleryStates = computed(() => SHIPS.map((s) => ({ def: s, state: createSh
 				</div>
 			</div>
 
-			<ShipMat :state="state" :color="color" :bounty="bounty" captain-name="Captain Ian" interactive @cell-click="onCellClick" />
+			<ShipMat :state="state" :color="color" :bounty="bounty" captain-name="Captain Ian" interactive can-impulse @cell-click="onCellClick" @impulse="state.impulseReady = false" />
 
 			<!-- Gallery of every ship to verify transcribed hold layouts -->
 			<div v-if="showGallery" class="grid gap-4 lg:grid-cols-2">
@@ -240,6 +240,7 @@ const galleryStates = computed(() => SHIPS.map((s) => ({ def: s, state: createSh
 	background: rgb(51 65 85);
 }
 .gallery-item :deep(.mat) {
-	--cell: 1.9rem;
+	--cell: 2.4rem;
+	--energy-cell: 2.4rem;
 }
 </style>

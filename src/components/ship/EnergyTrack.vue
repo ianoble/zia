@@ -17,7 +17,7 @@ const cells = computed(() =>
 
 <template>
 	<div class="energy" :style="{ '--cols': Math.floor(max / 2) + 1 }" role="meter" :aria-valuenow="energy" aria-valuemin="0" :aria-valuemax="max" :aria-label="`Energy ${energy} of ${max}`">
-		<div class="energy-badge" title="Energy">E</div>
+		<div class="energy-badge" title="Energy"><span>E</span></div>
 		<div class="energy-grid">
 			<div
 				v-for="c in cells"
@@ -37,23 +37,31 @@ const cells = computed(() =>
 
 <style scoped>
 .energy {
-	--hex-w: calc(var(--cell) * 0.72);
+	--hex-w: calc(var(--energy-cell, var(--cell)) * 0.8);
 	--hex-h: calc(var(--hex-w) * 1.1547);
 	display: flex;
 	align-items: center;
-	gap: calc(var(--cell) * 0.3);
+	gap: calc(var(--energy-cell, var(--cell)) * 0.3);
 }
 .energy-badge {
 	flex-shrink: 0;
-	width: calc(var(--cell) * 0.85);
-	height: calc(var(--cell) * 1.1);
+	/* Regular pentagon: height ≈ 0.95 × width. */
+	width: calc(var(--energy-cell, var(--cell)) * 1.05);
+	height: calc(var(--energy-cell, var(--cell)) * 1);
 	display: grid;
 	place-items: center;
-	font-weight: 900;
-	font-size: calc(var(--cell) * 0.6);
+	padding-top: calc(var(--energy-cell, var(--cell)) * 0.1);
+	font-family: 'Arial Narrow', 'Roboto Condensed', 'Segoe UI', sans-serif;
+	font-weight: 800;
+	font-size: calc(var(--energy-cell, var(--cell)) * 0.62);
+	line-height: 1;
 	color: #c0392b;
 	background: linear-gradient(160deg, #ffe66b, #f5a623);
-	clip-path: polygon(50% 0, 100% 35%, 80% 100%, 20% 100%, 0 35%);
+	clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%);
+}
+.energy-badge span {
+	display: inline-block;
+	transform: scale(0.85, 1.1);
 }
 .energy-grid {
 	position: relative;
@@ -80,7 +88,7 @@ const cells = computed(() =>
 	display: grid;
 	place-items: center;
 	font-weight: 800;
-	font-size: calc(var(--cell) * 0.36);
+	font-size: calc(var(--energy-cell, var(--cell)) * 0.36);
 	color: #fff;
 }
 .hex.spent .hex-inner {

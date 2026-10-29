@@ -7,6 +7,8 @@ Expansion tags: **[E]** Embers, **[MP]** Missions and Powers, **[KS]** Kickstart
 - **Content:** base game + Embers of a Forsaken Star. Missions and Powers [MP], Kickstarter/Sellsword [KS] and the Embers solo variant are out of scope, so their rules below can be ignored for now.
 - **Players:** 2–5. The 2-player variant applies at 2: NPCs count as players for mission targets, and the Lone Drifter auto-pilot gets +2 movement.
 - **NPCs** (Enforcer, Scoundrel, Merchant) are run automatically by the server. When the rules leave a choice to the controlling captain (e.g. ties between equally direct paths), the game prompts the active player to choose. The Kiln is an NPC card, but it has no turns.
+- **Starting sectors:** placed automatically around the first (centre) tile, each one edge-matching its symbol with the centre tile. Until tiles have edge symbols, placeholders are placed without matching.
+- **During play (for now):** captains can only move (impulse, engines). Buying, selling and everything else waits until real sectors with planets exist.
 - **Open question:** at 2 players there are 3 NPC cards but only 2 captains. Which captain's turn does the third NPC's turn follow? Proposed: deal NPCs to seats in order, wrapping around, so seat 0 runs 2 NPCs.
 
 ## Core rule changes from Embers (always on, p2)

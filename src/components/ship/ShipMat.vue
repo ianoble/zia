@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { IconChevronsRight, IconRocket } from '@tabler/icons-vue';
+import { IconArrowZigZag, IconRocket } from '@tabler/icons-vue';
 import { SHIPS_BY_ID, TIER_LABEL } from '../../data/ships';
 import { OUTFITS_BY_ID } from '../../data/outfits';
 import { parseShape } from '../../logic/holdGeometry';
 import { markersOnOutfits, totalDamage } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type PlayerColor, type ShipState } from '../../logic/types';
 import EnergyTrack from './EnergyTrack.vue';
-import HoldGrid from './HoldGrid.vue';
+import HoldGrid, { type HoldGhost } from './HoldGrid.vue';
 import { PLAYER_HEX, TIER_THEME } from './shipMatTheme';
 
 /**
@@ -21,8 +21,17 @@ const props = defineProps<{
 	captainName?: string;
 	/** Hold cells emit `cellClick` (used by the design preview and, later, damage placement). */
 	interactive?: boolean;
+	/** Whether the impulse token can be flipped right now (e.g. it is this captain's turn). */
+	canImpulse?: boolean;
+	/** Outfit placement: preview, extra margin around the hull, highlighted outfit. */
+	ghost?: HoldGhost | null;
+	margin?: number;
+	selectedUid?: string | null;
 }>();
-const emit = defineEmits<{ cellClick: [key: string] }>();
+const emit = defineEmits<{ cellClick: [key: string]; cellHover: [key: string | null]; impulse: [] }>();
+
+/** The impulse token flips once per turn to boost movement by the ship's impulse value. */
+const impulseClickable = computed(() => props.state.impulseReady && props.canImpulse);
 
 const ship = computed(() => SHIPS_BY_ID[props.state.shipId]);
 const theme = computed(() => TIER_THEME[ship.value.tier]);
@@ -82,9 +91,28 @@ const credits = (n: number) => n.toLocaleString('en-US');
 			</div>
 
 			<div class="panel impulse">
-				<div>Impulse: {{ ship.impulse }}</div>
-				<div class="impulse-token" :class="{ exhausted: !state.impulseReady }" :title="state.impulseReady ? 'Impulse ready' : 'Impulse used this turn'">
-					<IconChevronsRight :size="28" stroke-width="2.5" />
+				<div class="impulse-label">Impulse: {{ ship.impulse }}</div>
+				<button
+					type="button"
+					class="impulse-token"
+					:class="{ flipped: !state.impulseReady, clickable: impulseClickable }"
+					:disabled="!impulseClickable"
+					:aria-pressed="!state.impulseReady"
+					:aria-label="state.impulseReady ? `Flip impulse token: boost +${ship.impulse} movement` : 'Impulse token used this turn'"
+					:title="state.impulseReady ? `Flip to boost +${ship.impulse} movement (once per turn)` : 'Used this turn — flips back in the Status Phase'"
+					@click="emit('impulse')"
+				>
+					<span class="impulse-inner">
+						<span class="impulse-face front">
+							<IconArrowZigZag :size="44" stroke-width="2.5" />
+						</span>
+						<span class="impulse-face back">
+							<IconArrowZigZag :size="44" stroke-width="2.5" />
+						</span>
+					</span>
+				</button>
+				<div class="impulse-hint">
+					{{ state.impulseReady ? (impulseClickable ? 'Click to boost' : 'Ready') : 'Used this turn' }}
 				</div>
 			</div>
 		</div>
@@ -97,7 +125,17 @@ const credits = (n: number) => n.toLocaleString('en-US');
 			</div>
 
 			<div class="hold-area">
-				<HoldGrid :ship="ship" :state="state" :marker-color="markerColor" :interactive="interactive" @cell-click="emit('cellClick', $event)" />
+				<HoldGrid
+					:ship="ship"
+					:state="state"
+					:marker-color="markerColor"
+					:interactive="interactive"
+					:ghost="ghost"
+					:margin="margin"
+					:selected-uid="selectedUid"
+					@cell-click="emit('cellClick', $event)"
+					@cell-hover="emit('cellHover', $event)"
+				/>
 			</div>
 
 			<div class="energy-bar">
@@ -116,8 +154,10 @@ const credits = (n: number) => n.toLocaleString('en-US');
 
 <style scoped>
 .mat {
-	--cell: clamp(2.4rem, 4.6vw, 4.25rem);
-	max-width: 72rem;
+	--cell: clamp(3.5rem, 7.5vw, 7rem);
+	/* Energy meter scale (defaults to the hold cell size). */
+	--energy-cell: var(--cell);
+	max-width: 90rem;
 	margin-inline: auto;
 	display: grid;
 	grid-template-columns: minmax(11rem, 15rem) 1fr;
@@ -262,23 +302,78 @@ const credits = (n: number) => n.toLocaleString('en-US');
 }
 .impulse {
 	display: flex;
+	flex-direction: column;
 	align-items: center;
-	justify-content: space-between;
+	gap: 0.5rem;
 	margin-top: auto;
+	padding-bottom: 0.9rem;
 }
+.impulse-label {
+	align-self: flex-start;
+	font-size: 1.25rem;
+}
+/* Two-sided token that flips over when used. */
 .impulse-token {
+	width: 6.5rem;
+	height: 6.5rem;
+	padding: 0;
+	border: 0;
+	border-radius: 9999px;
+	background: transparent;
+	perspective: 600px;
+	cursor: default;
+}
+.impulse-token.clickable {
+	cursor: pointer;
+}
+.impulse-token.clickable:hover .impulse-inner {
+	transform: scale(1.05);
+}
+.impulse-token:focus-visible {
+	outline: 3px solid #fff;
+	outline-offset: 3px;
+}
+.impulse-inner {
+	position: relative;
+	display: block;
+	width: 100%;
+	height: 100%;
+	transform-style: preserve-3d;
+	transition: transform 0.5s ease;
+}
+.impulse-token.flipped .impulse-inner {
+	transform: rotateY(180deg);
+}
+.impulse-face {
+	position: absolute;
+	inset: 0;
 	display: grid;
 	place-items: center;
-	width: 3rem;
-	height: 3rem;
 	border-radius: 9999px;
-	background: radial-gradient(circle at 35% 30%, #d9dde3, #6e737b);
-	color: #fff;
-	box-shadow: inset 0 0 0 3px #3a3d43, 0 2px 4px #0006;
+	backface-visibility: hidden;
+	box-shadow: inset 0 0 0 4px #2f3237, inset 0 0 0 7px #ffffff30, 0 4px 8px #0008;
 }
-.impulse-token.exhausted {
-	background: radial-gradient(circle at 35% 30%, #5a5d63, #2a2c30);
-	color: #ffffff40;
+.impulse-face.front {
+	background: radial-gradient(circle at 35% 30%, #e4e7ec, #8a8f97 55%, #4d5157);
+	color: #fff;
+	filter: drop-shadow(0 0 0 transparent);
+}
+.impulse-face.front svg {
+	transform: rotate(90deg);
+	filter: drop-shadow(0 2px 2px #0008);
+}
+.impulse-face.back {
+	transform: rotateY(180deg);
+	background: radial-gradient(circle at 35% 30%, #4a4d53, #23252a);
+	color: #ffffff30;
+}
+.impulse-face.back svg {
+	transform: rotate(90deg);
+}
+.impulse-hint {
+	font-size: 0.75rem;
+	font-weight: 600;
+	opacity: 0.8;
 }
 
 /* ---- space ---- */
