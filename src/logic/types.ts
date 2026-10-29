@@ -88,6 +88,8 @@ export interface ZiaPlayer {
 	explorationTokens: ExplorationToken[];
 	/** Damage taken but not yet placed in the hold; the captain places each one before doing anything else. */
 	pendingDamage: DamageKind[];
+	/** Cargo cubes gained but not yet placed (or jettisoned); handled before doing anything else. */
+	pendingCargo: CubeColor[];
 }
 
 export interface ZiaSetupData {

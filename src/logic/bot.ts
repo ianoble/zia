@@ -7,7 +7,7 @@ import { OUTFITS_BY_ID } from '../data/outfits';
 import { reachableHexes } from './board';
 import { checkMove } from './game';
 import { autoPlace } from './holdGeometry';
-import { damageTargets, shipDef } from './ship';
+import { cargoTargets, damageTargets, shipDef } from './ship';
 import { MARKERS_PER_SHIP, type ZiaState } from './types';
 
 export interface BotMove {
@@ -45,6 +45,10 @@ export function botDecision(G: ZiaState, seat: string, currentPlayer: string, ra
 	}
 
 	if (G.stage === 'play' && p.ship && p.pendingDamage?.length) return { move: 'placeDamage', args: [damageTargets(p.ship)[0]] };
+	if (G.stage === 'play' && p.ship && p.pendingCargo?.length) {
+		const cell = cargoTargets(p.ship)[0];
+		return cell ? { move: 'placeCargo', args: [cell] } : { move: 'jettisonCargo', args: [] };
+	}
 	if (G.stage === 'play' && G.turn.explorationPairPending) return { move: 'claimExplorationPair', args: ['fame'] };
 
 	if (G.stage === 'play' && p.ship && p.position) {

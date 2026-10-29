@@ -1,5 +1,6 @@
 import { SHIPS_BY_ID, type ShipDef } from '../data/ships';
-import { cellKey, hullCells, placedCells } from './holdGeometry';
+import { OUTFITS_BY_ID } from '../data/outfits';
+import { cellKey, hullCells, occupancy, placedCells } from './holdGeometry';
 import { MARKERS_PER_SHIP, type DamageKind, type ShipState } from './types';
 
 /** A freshly launched ship: full energy, all markers armed, impulse ready, empty hold. */
@@ -30,13 +31,33 @@ export function markersOnOutfits(state: ShipState): number {
 	return state.outfits.reduce((n, o) => n + o.usedSpaces.length, 0);
 }
 
-/** Normal + ice damage; the ship is destroyed when this reaches its hold size (rulebook p14). */
+/** Normal + ice damage; the ship is destroyed when this reaches maxDamage (rulebook p14). */
 export function totalDamage(state: ShipState): number {
 	return state.damage.length + state.iceDamage.length;
 }
 
+/** Damage that destroys the ship: its hold size, +3 per Armor Plating (rulebook p27). */
+export function maxDamage(state: ShipState): number {
+	const plating = state.outfits.filter((o) => OUTFITS_BY_ID[o.outfitId]?.type === 'armor-plating').length;
+	return shipDef(state).holdSize + 3 * plating;
+}
+
 export function isDestroyed(state: ShipState): boolean {
-	return totalDamage(state) >= shipDef(state).holdSize;
+	return totalDamage(state) >= maxDamage(state);
+}
+
+/**
+ * Where a cargo cube can go: empty hold spaces (no outfit, damage or cube) and any
+ * Cargo Pod section (they hold cubes only) without damage or a cube.
+ */
+export function cargoTargets(state: ShipState): string[] {
+	const occupied = occupancy(state.outfits);
+	const keys = new Set([...hullCells(shipDef(state))].filter((k) => !occupied.has(k)));
+	for (const o of state.outfits) {
+		if (OUTFITS_BY_ID[o.outfitId]?.type === 'cargo-pod') for (const c of placedCells(o)) keys.add(cellKey(c.x, c.y));
+	}
+	const blocked = new Set([...state.damage, ...state.iceDamage, ...state.cargo.map((c) => c.cell)]);
+	return [...keys].filter((k) => !blocked.has(k));
 }
 
 /**

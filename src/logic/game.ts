@@ -25,11 +25,12 @@ import {
 	startingSpawnFor,
 	unexploredEdges,
 } from './board';
-import { canPlaceOutfit, cellKey, hullCells, occupancy, placedCells } from './holdGeometry';
-import { applyDamage, createShipState, damageTargets, shipDef, totalDamage } from './ship';
+import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
+import { applyDamage, cargoTargets, createShipState, damageTargets, maxDamage, shipDef, totalDamage } from './ship';
 import {
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
+	type CubeColor,
 	type DamageKind,
 	type PlacedOutfit,
 	type Rotation,
@@ -98,6 +99,7 @@ export function createInitialState(
 			outfittingDone: false,
 			explorationTokens: [],
 			pendingDamage: [],
+			pendingCargo: [],
 		};
 	});
 
@@ -211,19 +213,23 @@ function takeDamage(G: ZiaState, seat: string, kind: DamageKind, count: number, 
 	const p = G.players[seat];
 	const ship = p.ship!;
 	for (let i = 0; i < count; i++) p.pendingDamage.push(kind);
-	if (totalDamage(ship) + p.pendingDamage.length >= shipDef(ship).holdSize) {
+	if (totalDamage(ship) + p.pendingDamage.length >= maxDamage(ship)) {
 		destroyShip(G, seat, reason);
 		return true;
 	}
 	return false;
 }
 
-/** Put a cargo cube in an empty hold space; returns false (jettisoned) if there's no room. */
-function addCargo(ship: ShipState, color: ExplorationCube): boolean {
-	const blocked = new Set([...ship.damage, ...ship.iceDamage, ...ship.cargo.map((c) => c.cell), ...occupancy(ship.outfits).keys()]);
-	const cell = [...hullCells(shipDef(ship))].find((k) => !blocked.has(k));
-	if (!cell) return false;
-	ship.cargo.push({ cell, color });
+/**
+ * A captain gains a cargo cube: they choose where it goes (or jettison it). With no
+ * space for it at all it's jettisoned straight away. Returns false if jettisoned.
+ * Buying cubes at a planet will use this too.
+ * TODO: jettisoned cubes are left on the board in the ship's hex.
+ */
+function gainCargo(G: ZiaState, seat: string, color: CubeColor): boolean {
+	const p = G.players[seat];
+	if (cargoTargets(p.ship!).length <= p.pendingCargo.length) return false;
+	p.pendingCargo.push(color);
 	return true;
 }
 
@@ -255,7 +261,7 @@ function collectExplorationToken(G: ZiaState, seat: string, hex: string, random:
 		text += ' (missions come later)';
 	} else {
 		const color = token.slice('cargo-'.length) as ExplorationCube;
-		if (!addCargo(ship, color)) text += ', but the hold is full so it was jettisoned';
+		text += gainCargo(G, seat, color) ? ' (place it in your hold)' : ', but the hold is full so it was jettisoned';
 	}
 	log(G, seat, text);
 
@@ -283,6 +289,7 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 	p.position = null;
 	p.bounty = 0;
 	p.pendingDamage = [];
+	p.pendingCargo = [];
 	if (p.ship) p.ship.cargo = [];
 	G.turn.movement = 0;
 	log(G, seat, `was destroyed: ${reason}`);
@@ -330,12 +337,11 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (playerID !== currentPlayer) return 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
-	// Damage to place and exploration pairs to cash in come before anything else.
-	if (p.pendingDamage?.length && moveName !== 'placeDamage' && moveName !== 'claimExplorationPair') {
-		return 'First place your damage: click a space in your hold';
-	}
-	if (G.turn.explorationPairPending && moveName !== 'claimExplorationPair' && moveName !== 'placeDamage') {
-		return 'First choose 1 fame or 2,000 credits for your two exploration tokens';
+	// Damage and cubes to place and exploration pairs to cash in come before anything else.
+	if (!RESOLVING_MOVES.has(moveName)) {
+		if (p.pendingDamage?.length) return 'First place your damage: click a space in your hold';
+		if (p.pendingCargo?.length) return 'First place your cargo cube in your hold, or jettison it';
+		if (G.turn.explorationPairPending) return 'First choose 1 fame or 2,000 credits for your two exploration tokens';
 	}
 
 	switch (moveName) {
@@ -433,6 +439,13 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			if (!p.ship || !p.pendingDamage?.length) return 'No damage to place';
 			return damageTargets(p.ship).includes(args[0] as string) ? true : 'That space already has damage';
 
+		case 'placeCargo':
+			if (!p.ship || !p.pendingCargo?.length) return 'No cargo cube to place';
+			return cargoTargets(p.ship).includes(args[0] as string) ? true : "A cube can't go there";
+
+		case 'jettisonCargo':
+			return p.pendingCargo?.length ? true : 'No cargo cube to jettison';
+
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
 			return args[0] === 'fame' || args[0] === 'credits' ? true : 'Choose fame or credits';
@@ -448,6 +461,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	}
 	return `Unknown move ${moveName}`;
 }
+
+/** Moves that resolve something the captain must deal with first (damage, cubes, token pairs). */
+const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
 
 type MoveCtx = { G: ZiaState; ctx: Ctx; playerID: string; events: { endTurn: () => void }; random: RandomApi };
 
@@ -548,6 +564,20 @@ const moves = {
 		const kind = p.pendingDamage.shift()!;
 		const cube = applyDamage(p.ship!, kind, cell);
 		log(G, playerID, `placed ${kind === 'ice' ? 'ice damage' : 'damage'} in their hold${cube ? ` (a ${cube} cube was jettisoned)` : ''}`);
+	}),
+
+	/** Put a gained cargo cube on an empty hold space or Cargo Pod section of the captain's choice. */
+	placeCargo: guarded('placeCargo', ({ G, playerID }, cell: string) => {
+		const p = G.players[playerID];
+		const color = p.pendingCargo.shift()!;
+		p.ship!.cargo.push({ cell, color });
+		log(G, playerID, `stowed a ${color} cube`);
+	}),
+
+	/** Jettison a gained cargo cube instead of keeping it. */
+	jettisonCargo: guarded('jettisonCargo', ({ G, playerID }) => {
+		const color = G.players[playerID].pendingCargo.shift()!;
+		log(G, playerID, `jettisoned a ${color} cube`);
 	}),
 
 	/** Two face-up exploration tokens: discard both for 1 fame or 2,000 credits. */

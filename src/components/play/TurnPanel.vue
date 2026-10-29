@@ -34,6 +34,7 @@ const scanSides = computed(() => {
 });
 const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
 const pendingDamage = computed(() => props.G.players[props.playerID]?.pendingDamage ?? []);
+const pendingCargo = computed(() => props.G.players[props.playerID]?.pendingCargo ?? []);
 const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
 
@@ -59,6 +60,12 @@ watch(
 			Click a highlighted space in your hold. Damage on a cargo cube jettisons it; damage on a use space with a marker sends the marker to
 			Disarmed.
 		</p>
+	</div>
+
+	<div v-else-if="ship && def && pendingCargo.length" class="space-y-2 rounded-lg border border-emerald-800/70 bg-slate-900/70 p-3 text-sm">
+		<p class="font-semibold text-emerald-200">Place your {{ pendingCargo[0] }} cube{{ pendingCargo.length > 1 ? ` (+${pendingCargo.length - 1} more)` : '' }}</p>
+		<p class="text-xs text-slate-400">Click a highlighted space in your hold (an empty space or a Cargo Pod section).</p>
+		<button class="action justify-center" @click="emit('act', 'jettisonCargo')">Jettison it instead</button>
 	</div>
 
 	<div v-else-if="ship && def && pairPending" class="space-y-3 rounded-lg border border-fuchsia-800/70 bg-slate-900/70 p-3 text-sm">

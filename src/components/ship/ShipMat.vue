@@ -27,8 +27,9 @@ const props = defineProps<{
 	ghost?: HoldGhost | null;
 	margin?: number;
 	selectedUid?: string | null;
-	/** Hold cells to highlight as click targets (damage placement). */
+	/** Hold cells to highlight as click targets (damage or cargo placement). */
 	targets?: string[] | null;
+	targetKind?: 'damage' | 'cargo';
 }>();
 const emit = defineEmits<{ cellClick: [key: string]; cellHover: [key: string | null]; impulse: [] }>();
 
@@ -136,6 +137,7 @@ const credits = (n: number) => n.toLocaleString('en-US');
 					:margin="margin"
 					:selected-uid="selectedUid"
 					:targets="targets"
+					:target-kind="targetKind"
 					@cell-click="emit('cellClick', $event)"
 					@cell-hover="emit('cellHover', $event)"
 				/>

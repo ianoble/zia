@@ -25,6 +25,8 @@ const props = defineProps<{
 	selectedUid?: string | null;
 	/** Cells to highlight as click targets (e.g. where damage can go). */
 	targets?: string[] | null;
+	/** What the targets are for: red for damage, green for cargo. */
+	targetKind?: 'damage' | 'cargo';
 }>();
 const emit = defineEmits<{ cellClick: [key: string]; cellHover: [key: string | null] }>();
 
@@ -187,7 +189,7 @@ function onClick(key: string) {
 			:key="`t${t.key}`"
 			type="button"
 			class="token-cell"
-			:class="{ target: targetSet.has(t.key) }"
+			:class="{ target: targetSet.has(t.key), 'target-cargo': targetSet.has(t.key) && targetKind === 'cargo' }"
 			:style="pos(t.x, t.y)"
 			:tabindex="interactive ? 0 : -1"
 			:aria-label="`Hold space ${t.key}`"
@@ -236,6 +238,12 @@ function onClick(key: string) {
 }
 .token-cell.target:hover {
 	background: #ef444455;
+}
+.token-cell.target-cargo {
+	outline-color: #4ade80;
+}
+.token-cell.target-cargo:hover {
+	background: #22c55e55;
 }
 .hull-cell::before {
 	content: '';

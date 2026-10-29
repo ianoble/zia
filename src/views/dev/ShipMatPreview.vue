@@ -4,7 +4,7 @@ import ShipMat from '../../components/ship/ShipMat.vue';
 import { SHIPS, SHIPS_BY_ID, TIER_LABEL } from '../../data/ships';
 import { OUTFITS_BY_ID } from '../../data/outfits';
 import { autoPlace, placedCells, cellKey } from '../../logic/holdGeometry';
-import { createShipState } from '../../logic/ship';
+import { cargoTargets, createShipState, damageTargets } from '../../logic/ship';
 import { PLAYER_COLORS, MARKERS_PER_SHIP, type CubeColor, type PlayerColor, type ShipState } from '../../logic/types';
 
 /** Design sandbox for the ship mat — no server needed. Route: /dev/ship-mat */
@@ -15,6 +15,9 @@ const color = ref<PlayerColor>('red');
 const bounty = ref(0);
 const state = ref<ShipState>(createShipState(shipId.value));
 const loadoutNote = ref('');
+/** ?targets=damage|cargo highlights where damage or a cargo cube could be placed. */
+const targetKind = (['damage', 'cargo'] as const).find((k) => k === query.get('targets'));
+const targets = computed(() => (targetKind === 'damage' ? damageTargets(state.value) : targetKind === 'cargo' ? cargoTargets(state.value) : null));
 
 const ship = computed(() => SHIPS_BY_ID[shipId.value]);
 
@@ -216,7 +219,7 @@ const galleryStates = computed(() => SHIPS.map((s) => ({ def: s, state: createSh
 				</div>
 			</div>
 
-			<ShipMat :state="state" :color="color" :bounty="bounty" captain-name="Captain Ian" interactive can-impulse @cell-click="onCellClick" @impulse="state.impulseReady = false" />
+			<ShipMat :state="state" :color="color" :bounty="bounty" captain-name="Captain Ian" interactive can-impulse :targets="targets" :target-kind="targetKind" @cell-click="onCellClick" @impulse="state.impulseReady = false" />
 
 			<!-- Gallery of every ship to verify transcribed hold layouts -->
 			<div v-if="showGallery" class="grid gap-4 lg:grid-cols-2">

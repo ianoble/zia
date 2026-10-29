@@ -7,7 +7,8 @@ import { boardHexes, movePath, startingBoard, startingSpawnFor } from './board';
 import { EMBERS_EXPLORATION_TOKENS, type ExplorationToken } from '../data/exploration';
 import { SECTORS_BY_ID } from '../data/sectors';
 import { SHIPS_BY_ID } from '../data/ships';
-import { applyDamage, createShipState, damageTargets } from './ship';
+import { applyDamage, cargoTargets, createShipState, damageTargets, maxDamage } from './ship';
+import { autoPlace } from './holdGeometry';
 import { placedCells, cellKey } from './holdGeometry';
 
 const up = (key: string, n = 1) => {
@@ -105,9 +106,15 @@ describe('collecting exploration tokens', () => {
 		c.act('moveShip', up(c.spawn, 2));
 		const me = c.G().players[c.seat];
 		expect([...me.explorationTokens].sort()).toEqual(['cargo-holo', 'energy']);
-		expect(me.ship!.cargo.map((x) => x.color)).toEqual(['holo']);
+		expect(me.pendingCargo).toEqual(['holo']);
 		expect(me.ship!.energy).toBe(SHIPS_BY_ID['easy-tiger'].energy);
 		expect(c.G().turn.explorationPairPending).toBe(true);
+
+		// The cube: the captain picks where it goes.
+		expect(c.act('endTurn', 0)).toBe(false);
+		const cell = cargoTargets(me.ship!)[0];
+		expect(c.act('placeCargo', cell)).toBe(true);
+		expect(c.G().players[c.seat].ship!.cargo).toEqual([{ cell, color: 'holo' }]);
 
 		expect(c.act('endTurn', 0)).toBe(false); // must choose first
 		expect(c.act('claimExplorationPair', 'gold')).toBe(false);
@@ -185,5 +192,39 @@ describe('placing damage', () => {
 		applyDamage(ship, 'damage', cellKey(use.x, use.y));
 		expect(ship.outfits[0].usedSpaces).toEqual([]);
 		expect(ship.disarmedMarkers).toBe(1);
+	});
+});
+
+describe('cargo cubes', () => {
+	it('can be jettisoned instead of placed', () => {
+		const c = playClient(['cargo-spice']);
+		c.act('useImpulse');
+		c.act('moveShip', up(c.spawn));
+		expect(c.G().players[c.seat].pendingCargo).toEqual(['spice']);
+		expect(c.act('jettisonCargo')).toBe(true);
+		expect(c.G().players[c.seat].pendingCargo).toEqual([]);
+		expect(c.G().players[c.seat].ship!.cargo).toEqual([]);
+	});
+
+	it('go in empty hold spaces or Cargo Pod sections, not on outfits or damage', () => {
+		const ship = createShipState('easy-tiger');
+		const before = cargoTargets(ship);
+		expect(before).toHaveLength(SHIPS_BY_ID['easy-tiger'].holdSize);
+		const pod = autoPlace(SHIPS_BY_ID['easy-tiger'], [], 'cargo-pod', 'p1')!;
+		const engine = autoPlace(SHIPS_BY_ID['easy-tiger'], [pod], 'engine-d6', 'e1')!;
+		ship.outfits.push(pod, engine);
+		const targets = cargoTargets(ship);
+		for (const c of placedCells(pod)) expect(targets).toContain(cellKey(c.x, c.y));
+		for (const c of placedCells(engine)) expect(targets).not.toContain(cellKey(c.x, c.y));
+		ship.damage.push(targets[0]);
+		expect(cargoTargets(ship)).not.toContain(targets[0]);
+	});
+
+	it('Armor Plating adds 3 to the damage a ship can take', () => {
+		const ship = createShipState('easy-tiger');
+		const hold = SHIPS_BY_ID['easy-tiger'].holdSize;
+		expect(maxDamage(ship)).toBe(hold);
+		ship.outfits.push(autoPlace(SHIPS_BY_ID['easy-tiger'], [], 'armor-plating', 'a1')!);
+		expect(maxDamage(ship)).toBe(hold + 3);
 	});
 });
