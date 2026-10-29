@@ -158,13 +158,13 @@ describe('edge symbols', () => {
 	});
 
 	it.each([0, 1, 2, 3, 4, 5])('exploring from a tile turned %i matches the symbol on every side', (rotation) => {
-		const board: BoardState = { sectors: [{ tileId: 'blank-1', center: { q: 0, r: 0 }, rotation }] };
+		const board: BoardState = { sectors: [{ tileId: 'neo-damascus', center: { q: 0, r: 0 }, rotation }] };
 		for (let slot = 0; slot < 6; slot++) {
 			const placed = explorePlacement(board, 0, slot)!;
 			expect(placed.center).toEqual(SECTOR_NEIGHBOR_OFFSETS[slot]);
 			expect(placed.rotation).toBe(matchedRotation(rotation));
 			expect(edgeSymbolFacing(placed.rotation, (slot + 3) % 6)).toBe(edgeSymbolFacing(rotation, slot));
-			const marks = edgeSymbolMarks({ sectors: [...board.sectors, { tileId: 'blank-2', ...placed }] });
+			const marks = edgeSymbolMarks({ sectors: [...board.sectors, { tileId: 'kemplar-ii', ...placed }] });
 			const a = marks.find((m) => m.sectorIndex === 0 && m.slot === slot)!;
 			const b = marks.find((m) => m.sectorIndex === 1 && m.slot === (slot + 3) % 6)!;
 			expect(sameEdge(a, b)).toBe(true);

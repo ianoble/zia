@@ -3,8 +3,10 @@ import { Client } from 'boardgame.io/client';
 import type { Ctx } from 'boardgame.io';
 import { checkMove, gameDef } from './index';
 import type { ZiaState } from './types';
-import { boardHexes, edgeSymbolFacing, reachableHexes, respawnHex, spawnPoints, startingBoard, startingDeck, unexploredEdges } from './board';
+import { boardHexes, dealStartingTiles, edgeSymbolFacing, reachableHexes, respawnHex, spawnPoints, startingBoard, startingDeck, unexploredEdges } from './board';
 import { SHIPS_BY_ID } from '../data/ships';
+import { SECTORS_BY_ID } from '../data/sectors';
+import { hexesInRange } from './hex';
 
 /** A 2-captain game past setup, with an optional fixed sector deck. Easy Tiger (impulse 3) moves first. */
 function playClient(deck?: string[]) {
@@ -49,17 +51,26 @@ function flyToRim(c: ReturnType<typeof playClient>) {
 }
 
 describe('sector deck', () => {
+	it('deals random starting sectors, all with a spawn point', () => {
+		const rolls = [3, 1, 5];
+		const tiles = dealStartingTiles(3, () => rolls.shift()!);
+		expect(new Set(tiles).size).toBe(3);
+		for (const id of tiles) expect(SECTORS_BY_ID[id].spawnPoint).toBeDefined();
+	});
+
 	it('holds every tile not on the board', () => {
 		const board = startingBoard(['0', '1', '2']);
 		const deck = startingDeck(board);
-		expect(deck).toHaveLength(17);
-		expect(deck).not.toContain('blank-1');
-		expect(deck).toContain('blank-4');
+		expect(deck).toHaveLength(32 - 1 - 3); // all tiles minus Nyr and 3 starting sectors
+		expect(deck).not.toContain('nyr');
+		expect(deck).not.toContain('neo-damascus');
+		expect(deck).toContain('doravin-v');
+		expect(deck).toContain('xia');
 	});
 
 	it('starts each game with the unused tiles', () => {
 		const { G } = playClient();
-		expect(G().sectorDeck).toHaveLength(18);
+		expect(G().sectorDeck).toHaveLength(32 - 1 - 2);
 	});
 });
 
@@ -84,7 +95,7 @@ describe('Scan Sector', () => {
 
 		expect(c.G().players[c.seat].ship!.energy).toBe(energy - 1);
 		expect(c.G().turn.movement).toBe(0);
-		expect(c.G().sectorDeck).toHaveLength(17);
+		expect(c.G().sectorDeck).toHaveLength(32 - 1 - 2 - 1);
 		expect(c.G().board.sectors).toHaveLength(sectors + 1);
 		expect(c.G().players[c.seat].position).toBe(rim); // the ship stays put
 		const from = c.G().board.sectors[edge.sectorIndex];
@@ -102,7 +113,7 @@ describe('Scan Sector', () => {
 
 describe('Blind Jump', () => {
 	it('costs 1 movement, places the tile and moves the ship in, keeping the rest of its movement', () => {
-		const c = playClient(['blank-12']);
+		const c = playClient(['vortex-86']);
 		const rim = flyToRim(c);
 		const movement = c.G().turn.movement;
 		expect(movement).toBeGreaterThanOrEqual(1);
@@ -113,7 +124,7 @@ describe('Blind Jump', () => {
 		expect(c.G().players[c.seat].position).toBe(target);
 		expect(c.G().turn.movement).toBe(movement - 1);
 		expect(c.G().sectorDeck).toEqual([]);
-		expect(c.G().board.sectors.at(-1)!.tileId).toBe('blank-12');
+		expect(c.G().board.sectors.at(-1)!.tileId).toBe('vortex-86');
 		expect(c.state().ctx.currentPlayer).toBe(c.seat); // minor action: the turn goes on
 	});
 
@@ -127,7 +138,9 @@ describe('Blind Jump', () => {
 	});
 
 	it('into a star destroys the ship, ends the turn, and it respawns on its next turn', () => {
-		const c = playClient(['blank-18']);
+		// Placeholder layouts keep stars in the middle of a tile, out of a jump's reach, so use an all-star test tile.
+		SECTORS_BY_ID['test-star'] = { ...SECTORS_BY_ID['xia'], id: 'test-star', spaces: hexesInRange({ q: 0, r: 0 }, 2).map((at) => ({ at, kind: 'star' as const })) };
+		const c = playClient(['test-star']);
 		const rim = flyToRim(c);
 		const { target } = unexploredEdges(c.G().board, rim)[0];
 		expect(c.act('blindJump', target)).toBe(true);

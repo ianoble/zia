@@ -1,4 +1,4 @@
-import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS, NYR_SECTOR, PLACEHOLDER_SECTORS, SECTORS_BY_ID, type EdgeSymbol, type SectorSpace, type SpaceKind } from '../data/sectors';
+import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS, NYR_SECTOR, SECTOR_TILES, SECTORS_BY_ID, STARTING_CANDIDATES, type EdgeSymbol, type SectorSpace, type SpaceKind } from '../data/sectors';
 import {
 	addHex,
 	hexKey,
@@ -130,18 +130,28 @@ export function edgeSymbolMarks(board: BoardState): EdgeSymbolMark[] {
 }
 
 /**
+ * Deal starting sectors (rulebook p3): one per captain from the shuffled deck, re-drawing
+ * any tile without a spawn point, which comes to a random pick among tiles with one.
+ * `die(n)` returns 1..n.
+ */
+export function dealStartingTiles(count: number, die: (sides: number) => number): string[] {
+	const pool = STARTING_CANDIDATES.map((t) => t.id);
+	return Array.from({ length: count }, () => pool.splice(die(pool.length) - 1, 1)[0]);
+}
+
+/**
  * Starting layout (Embers): Nyr in the centre, then one starting sector per captain in
  * the rulebook's positions, each rotated so its edge symbol matches Nyr's.
- * Captains get sectors in seat order (seat 1 → sector 1, …).
+ * Captains get `tileIds` in seat order; by default the lowest-numbered spawn tiles.
  */
-export function startingBoard(seats: string[]): BoardState {
+export function startingBoard(seats: string[], tileIds: string[] = STARTING_CANDIDATES.map((t) => t.id)): BoardState {
 	const slots = NYR_STARTING_SLOTS[seats.length] ?? NYR_STARTING_SLOTS[5];
 	const nyrRotation = 0;
 	return {
 		sectors: [
 			{ tileId: NYR_SECTOR.id, center: { q: 0, r: 0 }, rotation: nyrRotation },
 			...seats.map((seat, i) => ({
-				tileId: `blank-${i + 1}`,
+				tileId: tileIds[i],
 				center: SECTOR_NEIGHBOR_OFFSETS[slots[i]],
 				rotation: rotationShowing(edgeSymbolFacing(nyrRotation, slots[i]), (slots[i] + 3) % 6),
 				ownerSeat: seat,
@@ -169,7 +179,7 @@ export function boardHexes(board: BoardState): Map<string, BoardHex> {
 /** Sector tiles left to explore: every tile not on the board (Nyr is always placed). */
 export function startingDeck(board: BoardState): string[] {
 	const placed = new Set(board.sectors.map((s) => s.tileId));
-	return PLACEHOLDER_SECTORS.map((t) => t.id).filter((id) => !placed.has(id));
+	return SECTOR_TILES.map((t) => t.id).filter((id) => !placed.has(id));
 }
 
 export interface UnexploredEdge {

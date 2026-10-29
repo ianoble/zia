@@ -6,6 +6,7 @@ import { OUTFITS, OUTFITS_BY_ID, type Die } from '../data/outfits';
 import { SECTORS_BY_ID } from '../data/sectors';
 import {
 	boardHexes,
+	dealStartingTiles,
 	explorePlacement,
 	reachableHexes,
 	respawnHex,
@@ -90,7 +91,8 @@ export function createInitialState(
 
 	const supply: Record<string, number> = {};
 	for (const o of OUTFITS) if (o.copies != null) supply[o.id] = o.copies;
-	const board = startingBoard(seats);
+	const die = random?.Die ?? ((sides: number) => 1 + Math.floor(Math.random() * sides));
+	const board = startingBoard(seats, dealStartingTiles(seats.length, die));
 
 	return {
 		history: [],

@@ -119,9 +119,14 @@ const symbolMarks = computed(() =>
 const sectorLabels = computed(() =>
 	props.board.sectors.map((s, i) => {
 		const { x, y } = hexToPixel(s.center, SIZE);
-		return { i, x, y: y - SIZE * Math.sqrt(3) * 2 - 18, name: SECTORS_BY_ID[s.tileId]?.name ?? s.tileId };
+		const def = SECTORS_BY_ID[s.tileId];
+		const info = def ? [def.types.join(' / '), ...def.features, def.spawnPoint != null ? `Spawn point ${def.spawnPoint}` : ''].filter(Boolean).join(' · ') : '';
+		return { i, x, y: y - SIZE * Math.sqrt(3) * 2 - 18, name: def?.name ?? s.tileId, info };
 	}),
 );
+
+/** Hover text for every hex: its sector's name, type and features. */
+const sectorTitles = computed(() => sectorLabels.value.map((s) => (s.info ? `${s.name} — ${s.info}` : s.name)));
 
 const shipViews = computed(() =>
 	props.ships.map((s) => {
@@ -209,6 +214,7 @@ function onHexClick(key: string) {
 
 			<!-- Spaces -->
 			<g v-for="h in hexes" :key="h.key" :data-hex="h.key" class="hex" :class="{ reachable: reachable?.has(h.key) }" @click="onHexClick(h.key)">
+				<title>{{ sectorTitles[h.sectorIndex] }}</title>
 				<polygon :points="h.points" class="hex-shape" :class="{ 'star-hex': h.kind === 'star' }" />
 				<g v-if="h.kind === 'spawn'" class="spawn">
 					<circle :cx="h.x" :cy="h.y" r="46" />
@@ -386,10 +392,13 @@ function onHexClick(key: string) {
 	pointer-events: none;
 }
 .sector-label {
-	font-size: 30px;
+	font-size: 24px;
 	font-weight: 800;
-	fill: #c9d4ff88;
-	letter-spacing: 0.05em;
+	fill: #c9d4ffbb;
+	stroke: #05060f;
+	stroke-width: 6;
+	paint-order: stroke;
+	letter-spacing: 0.03em;
 	pointer-events: none;
 }
 .ship {

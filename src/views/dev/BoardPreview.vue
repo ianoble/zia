@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import BoardMap from '../../components/board/BoardMap.vue';
 import { explorePlacement, slotCrossed, startingBoard, type BoardState } from '../../logic/board';
-import { PLACEHOLDER_SECTORS } from '../../data/sectors';
+import { startingDeck } from '../../logic/board';
 import { HEX_DIRECTIONS, hexKey } from '../../logic/hex';
 
 const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
@@ -48,7 +48,9 @@ function exploreFrom(sectorIndex: number, slot: number): boolean {
 	if (!board.value.sectors[sectorIndex] || slot < 0) return false;
 	const placed = explorePlacement(board.value, sectorIndex, slot);
 	if (!placed) return false;
-	const tile = PLACEHOLDER_SECTORS[(board.value.sectors.length - 1) % PLACEHOLDER_SECTORS.length];
+	const deck = startingDeck(board.value);
+	if (!deck.length) return false;
+	const tile = { id: deck[Math.floor(Math.random() * deck.length)] };
 	board.value = { sectors: [...board.value.sectors, { tileId: tile.id, ...placed }] };
 	note.value = `Explored from sector ${sectorIndex} through side ${SLOT_NAMES[slot]}; new tile turned ${placed.rotation * 60}°.`;
 	return true;
