@@ -14,6 +14,8 @@ export function createInitialState(ctx: Pick<Ctx, 'numPlayers' | 'playOrder'>, s
 			color: PLAYER_COLORS[i % PLAYER_COLORS.length],
 			credits: STARTING_CREDITS,
 			fame: 0,
+			bounty: 0,
+			ship: null,
 		};
 	});
 	return {
@@ -50,6 +52,6 @@ export const ziaGameDef = defineGame<ZiaState>({
 	id: 'zia',
 	displayName: 'Xia: Legends of a Drift System',
 	description: 'Online play for Xia: Legends of a Drift System — explore, trade, fight and become a legend.',
-	minPlayers: 3,
+	minPlayers: 2,
 	maxPlayers: 5,
 });

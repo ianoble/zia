@@ -9,5 +9,6 @@ export const router = createRouter({
     { path: '/', component: LobbyView },
     { path: '/join/:matchID', component: JoinView, props: true },
     { path: '/game/:matchID/:playerID', component: GameView, props: true },
+    { path: '/dev/ship-mat', component: () => import('./views/dev/ShipMatPreview.vue') },
   ],
 });

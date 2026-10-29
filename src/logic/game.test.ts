@@ -21,7 +21,7 @@ describe('zia game scaffold', () => {
 
 	it('is registered as zia', () => {
 		expect(gameDef.id).toBe('zia');
-		expect(gameDef.minPlayers).toBe(3);
+		expect(gameDef.minPlayers).toBe(2);
 		expect(gameDef.maxPlayers).toBe(5);
 	});
 });

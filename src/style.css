@@ -3,3 +3,14 @@
 .drag-overlay {
   display: none !important;
 }
+
+/* Player marker pieces (ship mat): hard black outline so they read on any background. */
+.piece::before,
+.mat .marker::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+  background: var(--marker);
+  box-shadow: inset 0 -4px 4px #0003;
+}
