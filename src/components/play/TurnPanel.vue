@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
 import { freeEngineUseSpaces } from '../../logic/game';
+import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import { shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
@@ -19,6 +20,17 @@ const engines = computed(() =>
 		.filter((o) => OUTFITS_BY_ID[o.outfitId].type === 'engine')
 		.map((o) => ({ uid: o.uid, def: OUTFITS_BY_ID[o.outfitId], free: freeEngineUseSpaces(ship.value!, o.uid).length })),
 );
+
+/** Sides of my sector with an unexplored edge next to my ship, for Scan Sector. */
+const scanSides = computed(() => {
+	const pos = props.G.players[props.playerID]?.position;
+	if (!pos) return [];
+	const seen = new Set<number>();
+	return unexploredEdges(props.G.board, pos)
+		.filter((e) => !seen.has(e.slot) && seen.add(e.slot))
+		.map((e) => ({ slot: e.slot, name: SLOT_NAMES[e.slot], symbol: edgeSymbolFacing(props.G.board.sectors[e.sectorIndex].rotation, e.slot) }));
+});
+const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
 
 const maxArm = computed(() => (ship.value ? Math.min(MARKERS_PER_SHIP - ship.value.armedMarkers, ship.value.energy) : 0));
 const armCount = ref(0);
@@ -66,6 +78,33 @@ watch(
 			<p v-if="!engines.length" class="text-xs text-slate-500">No engines fitted — impulse is your only movement.</p>
 			<p v-else class="text-xs text-slate-500">
 				Standard action: uses an armed marker ({{ ship.armedMarkers }} left). Unspent movement is lost first.
+			</p>
+		</div>
+
+		<div class="space-y-2">
+			<div class="flex items-center justify-between">
+				<span class="font-semibold text-slate-300">Explore</span>
+				<span class="text-xs text-slate-500">{{ deckLeft }} sector{{ deckLeft === 1 ? '' : 's' }} left</span>
+			</div>
+			<template v-if="scanSides.length && deckLeft">
+				<button
+					v-for="s in scanSides"
+					:key="s.slot"
+					class="action"
+					:disabled="ship.energy < 1"
+					:title="ship.energy < 1 ? 'Needs 1 energy' : `Draw a sector and place it against the ${s.name} edge (${s.symbol} symbol)`"
+					@click="emit('act', 'scanSector', s.slot)"
+				>
+					<span>Scan {{ s.name }} edge</span>
+					<span class="text-violet-300">{{ s.symbol }} · 1 energy</span>
+				</button>
+				<p class="text-xs text-slate-500">
+					Standard action: ends movement. Or Blind Jump (minor, 1 movement): click a dashed space off the board next to your ship. You must fly
+					in, whatever is there.
+				</p>
+			</template>
+			<p v-else class="text-xs text-slate-500">
+				{{ deckLeft ? 'Move next to an unexplored edge (the outer rim of the map) to Scan or Blind Jump.' : 'Every sector has been explored.' }}
 			</p>
 		</div>
 

@@ -107,6 +107,8 @@ export interface ZiaState extends BaseGameState {
 	players: Record<string, ZiaPlayer>;
 	fameTarget: number;
 	board: BoardState;
+	/** Sector tile ids not yet explored; a random one is drawn for each Scan / Blind Jump. */
+	sectorDeck: string[];
 	/** Setup ship-pick (and outfitting) order: highest d20 first, then counter-clockwise. */
 	pickOrder: string[];
 	/** Play order: the last captain to pick goes first, then clockwise. */

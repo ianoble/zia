@@ -1,4 +1,4 @@
-import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS, NYR_SECTOR, SECTORS_BY_ID, type EdgeSymbol, type SpaceKind } from '../data/sectors';
+import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS, NYR_SECTOR, PLACEHOLDER_SECTORS, SECTORS_BY_ID, type EdgeSymbol, type SectorSpace, type SpaceKind } from '../data/sectors';
 import {
 	addHex,
 	hexKey,
@@ -30,6 +30,8 @@ export interface BoardHex {
 	hex: Axial;
 	sectorIndex: number;
 	kind: SpaceKind | null;
+	/** Spawn point number, for spawn spaces that have one. */
+	spawnNumber?: number;
 }
 
 /**
@@ -37,6 +39,9 @@ export interface BoardHex {
  * SECTOR_NEIGHBOR_OFFSETS: E 0, SE 1, SW 2, W 3, NW 4, NE 5.
  */
 export const SECTOR_SLOT = { E: 0, SE: 1, SW: 2, W: 3, NW: 4, NE: 5 } as const;
+
+/** Compass names of the neighbour slots, by index. */
+export const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'] as const;
 
 /**
  * Where the starting sectors go around Nyr, in placement order, from the rulebook's
@@ -150,14 +155,64 @@ export function boardHexes(board: BoardState): Map<string, BoardHex> {
 	const map = new Map<string, BoardHex>();
 	board.sectors.forEach((s, sectorIndex) => {
 		const def = SECTORS_BY_ID[s.tileId];
-		const special = new Map<string, SpaceKind>();
-		for (const sp of def?.spaces ?? []) special.set(hexKey(addHex(s.center, rotateHex(sp.at, s.rotation))), sp.kind);
+		const special = new Map<string, SectorSpace>();
+		for (const sp of def?.spaces ?? []) special.set(hexKey(addHex(s.center, rotateHex(sp.at, s.rotation))), sp);
 		for (const hex of sectorHexes(s.center)) {
 			const key = hexKey(hex);
-			map.set(key, { key, hex, sectorIndex, kind: special.get(key) ?? null });
+			const sp = special.get(key);
+			map.set(key, { key, hex, sectorIndex, kind: sp?.kind ?? null, ...(sp?.number != null ? { spawnNumber: sp.number } : {}) });
 		}
 	});
 	return map;
+}
+
+/** Sector tiles left to explore: every tile not on the board (Nyr is always placed). */
+export function startingDeck(board: BoardState): string[] {
+	const placed = new Set(board.sectors.map((s) => s.tileId));
+	return PLACEHOLDER_SECTORS.map((t) => t.id).filter((id) => !placed.has(id));
+}
+
+export interface UnexploredEdge {
+	/** Index of the sector the ship is in. */
+	sectorIndex: number;
+	/** Side of that sector the edge is on (neighbour slot). */
+	slot: number;
+	/** The off-board hex across the edge (a Blind Jump destination). */
+	target: string;
+}
+
+/**
+ * Unexplored edges next to a hex: each neighbouring space that isn't on the board yet.
+ * A ship here can Scan through any of their sides or Blind Jump into any target.
+ */
+export function unexploredEdges(board: BoardState, fromKey: string): UnexploredEdge[] {
+	const hexes = boardHexes(board);
+	if (!hexes.has(fromKey)) return [];
+	const out: UnexploredEdge[] = [];
+	for (const n of hexNeighbors(parseHexKey(fromKey))) {
+		const target = hexKey(n);
+		if (hexes.has(target)) continue;
+		const crossed = slotCrossed(board, fromKey, target);
+		if (crossed) out.push({ ...crossed, target });
+	}
+	return out;
+}
+
+/** Numbered spawn points on the board, keyed by hex. */
+export function spawnPoints(board: BoardState): { key: string; number: number }[] {
+	return [...boardHexes(board).values()].filter((h) => h.kind === 'spawn' && h.spawnNumber != null).map((h) => ({ key: h.key, number: h.spawnNumber! }));
+}
+
+/**
+ * Respawn hex for a d20 roll (rulebook p15): the unoccupied spawn point whose number is
+ * closest to the roll; ties go to the higher number. (On a 20 the captain may choose;
+ * for now that also takes the closest.)
+ */
+export function respawnHex(board: BoardState, roll: number, occupied: Set<string>): string | null {
+	const free = spawnPoints(board).filter((p) => !occupied.has(p.key));
+	if (!free.length) return null;
+	free.sort((a, b) => Math.abs(a.number - roll) - Math.abs(b.number - roll) || b.number - a.number);
+	return free[0].key;
 }
 
 /** The spawn hex of a seat's starting sector. */

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { SECTORS_BY_ID } from '../../data/sectors';
 import { boardHexes, edgeSymbolMarks, type BoardState } from '../../logic/board';
-import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex } from '../../logic/hex';
+import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex, parseHexKey } from '../../logic/hex';
 
 /**
  * The drift system: sectors of 19 flat-top hexes (geometry from sector_19_spaces.svg,
@@ -21,6 +21,8 @@ const props = defineProps<{
 	ships: BoardShip[];
 	/** Hexes the active ship can move to, with their movement cost. */
 	reachable?: Map<string, number> | null;
+	/** Unexplored hexes (off the board) the active ship can Blind Jump into. */
+	jumpTargets?: string[] | null;
 }>();
 const emit = defineEmits<{ hexClick: [key: string] }>();
 
@@ -31,6 +33,21 @@ const hexes = computed(() =>
 		const { x, y } = hexToPixel(h.hex, SIZE);
 		return {
 			...h,
+			x,
+			y,
+			points: hexCorners(x, y, SIZE)
+				.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`)
+				.join(' '),
+		};
+	}),
+);
+
+/** Ghost hexes off the board for Blind Jump destinations. */
+const jumpViews = computed(() =>
+	(props.jumpTargets ?? []).map((key) => {
+		const { x, y } = hexToPixel(parseHexKey(key), SIZE);
+		return {
+			key,
 			x,
 			y,
 			points: hexCorners(x, y, SIZE)
@@ -74,12 +91,14 @@ const starEdges = computed(() => {
 	return lines;
 });
 
-/** Star hexes fully surrounded by star (the centre of each star region), for the glow. */
+/** Centre of each star region for the glow: star hexes fully surrounded by star, or single-hex stars. */
 const starCenters = computed(() => {
 	const all = boardHexes(props.board);
-	return hexes.value.filter(
-		(h) => h.kind === 'star' && HEX_DIRECTIONS.every((d) => all.get(hexKey(addHex(h.hex, d)))?.kind === 'star'),
-	);
+	return hexes.value.filter((h) => {
+		if (h.kind !== 'star') return false;
+		const starNeighbours = HEX_DIRECTIONS.filter((d) => all.get(hexKey(addHex(h.hex, d)))?.kind === 'star').length;
+		return starNeighbours === 6 || starNeighbours === 0;
+	});
 });
 
 /**
@@ -195,6 +214,14 @@ function onHexClick(key: string) {
 					<text :x="h.x" :y="h.y + 13" text-anchor="middle">⟳</text>
 				</g>
 				<text v-if="reachable?.has(h.key)" :x="h.x" :y="h.y + 78" text-anchor="middle" class="cost">{{ reachable.get(h.key) }}</text>
+			</g>
+
+			<!-- Blind Jump destinations (unexplored space) -->
+			<g v-for="j in jumpViews" :key="`jump${j.key}`" :data-hex="j.key" class="hex jump" @click="onHexClick(j.key)">
+				<title>Blind Jump here (1 movement): draw a sector, then move in, whatever is there</title>
+				<polygon :points="j.points" class="jump-shape" />
+				<text :x="j.x" :y="j.y - 4" text-anchor="middle" class="jump-label">Blind</text>
+				<text :x="j.x" :y="j.y + 30" text-anchor="middle" class="jump-label">jump</text>
 			</g>
 
 			<!-- Stars -->
@@ -314,6 +341,22 @@ function onHexClick(key: string) {
 	font-size: 30px;
 	font-weight: 700;
 	fill: #9fe3ff;
+	pointer-events: none;
+}
+.jump-shape {
+	fill: #2a1a4a66;
+	stroke: #c084fc;
+	stroke-width: 4;
+	stroke-dasharray: 14 10;
+	cursor: pointer;
+}
+.hex.jump:hover .jump-shape {
+	fill: #6b21a8aa;
+}
+.jump-label {
+	font-size: 28px;
+	font-weight: 800;
+	fill: #e9d5ff;
 	pointer-events: none;
 }
 .hex-shape.star-hex,

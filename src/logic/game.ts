@@ -3,7 +3,18 @@ import { INVALID_MOVE, TurnOrder } from 'boardgame.io/core';
 import { defineGame } from '@engine/client';
 import { IN_SCOPE_SHIPS, SHIPS_BY_ID } from '../data/ships';
 import { OUTFITS, OUTFITS_BY_ID, type Die } from '../data/outfits';
-import { boardHexes, reachableHexes, startingBoard, startingSpawnFor } from './board';
+import { SECTORS_BY_ID } from '../data/sectors';
+import {
+	boardHexes,
+	explorePlacement,
+	reachableHexes,
+	respawnHex,
+	SLOT_NAMES,
+	startingBoard,
+	startingDeck,
+	startingSpawnFor,
+	unexploredEdges,
+} from './board';
 import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
 import { createShipState, shipDef } from './ship';
 import {
@@ -79,13 +90,15 @@ export function createInitialState(
 
 	const supply: Record<string, number> = {};
 	for (const o of OUTFITS) if (o.copies != null) supply[o.id] = o.copies;
+	const board = startingBoard(seats);
 
 	return {
 		history: [],
 		stage: 'pickShip',
 		players,
 		fameTarget: setupData?.fameTarget ?? DEFAULT_FAME_TARGET,
-		board: startingBoard(seats),
+		board,
+		sectorDeck: startingDeck(board),
 		pickOrder,
 		turnOrder,
 		supply,
@@ -159,6 +172,60 @@ function armMarkers(ship: ShipState, n: number) {
 }
 
 const markersAvailableToArm = (ship: ShipState) => MARKERS_PER_SHIP - ship.armedMarkers;
+
+/** Draw a random tile from the sector deck and place it against `sectorIndex`'s `slot` side. */
+function exploreSector(G: ZiaState, random: RandomApi, sectorIndex: number, slot: number): string {
+	const [tileId] = G.sectorDeck.splice(random.Die(G.sectorDeck.length) - 1, 1);
+	const placed = explorePlacement(G.board, sectorIndex, slot)!;
+	G.board.sectors.push({ tileId, ...placed });
+	return SECTORS_BY_ID[tileId]?.name ?? tileId;
+}
+
+/**
+ * Ship destroyed (rulebook p15): it leaves the board, loses its cargo and bounty, and
+ * respawns at the start of its next turn. Outfits, credits and fame are kept.
+ * TODO: jettison cargo into the hex, discard missions, rewards for the attacker.
+ */
+function destroyShip(G: ZiaState, seat: string, reason: string) {
+	const p = G.players[seat];
+	p.position = null;
+	p.bounty = 0;
+	if (p.ship) p.ship.cargo = [];
+	G.turn.movement = 0;
+	log(G, seat, `was destroyed: ${reason}`);
+}
+
+/**
+ * Respawn (rulebook p15, Embers: no lost turn): roll a d20 and go to the closest
+ * unoccupied spawn point, with full energy, all markers armed, tokens refreshed and
+ * damage cleared. A natural 20 is Luck: +1 fame.
+ * TODO: the ship then takes damage equal to its tier, placed by its captain.
+ */
+function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
+	const p = G.players[seat];
+	const ship = p.ship!;
+	const roll = random.D20();
+	const hex = respawnHex(G.board, roll, occupiedHexes(G, seat));
+	if (!hex) {
+		log(G, seat, `rolled ${roll} to respawn, but every spawn point is taken`);
+		return;
+	}
+	p.position = hex;
+	ship.energy = shipDef(ship).energy;
+	ship.armedMarkers = MARKERS_PER_SHIP;
+	ship.disarmedMarkers = 0;
+	for (const o of ship.outfits) o.usedSpaces = [];
+	ship.impulseReady = true;
+	ship.abilityExhausted = false;
+	ship.damage = [];
+	ship.iceDamage = [];
+	const spawn = boardHexes(G.board).get(hex)?.spawnNumber;
+	log(G, seat, `rolled ${roll} and respawned at spawn point ${spawn}`);
+	if (roll === 20) {
+		p.fame++;
+		log(G, seat, 'rolled a natural 20: +1 fame for Luck');
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Validation (shared by the client for instant feedback and by the moves)
@@ -235,6 +302,27 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			if (occupiedHexes(G, playerID).has(target)) return 'Another ship is there';
 			if (!reachableHexes(G.board, p.position, G.turn.movement, occupiedHexes(G, playerID)).has(target)) {
 				return 'Not enough movement to reach that space';
+			}
+			return true;
+		}
+
+		case 'scanSector': {
+			if (G.stage !== 'play' || !p.ship || !p.position) return 'Not during setup';
+			if (!G.sectorDeck.length) return 'No sector tiles left to explore';
+			if (p.ship.energy < 1) return 'Scanning needs 1 energy';
+			const slot = args[0];
+			if (!unexploredEdges(G.board, p.position).some((e) => e.slot === slot)) {
+				return 'Your ship must be next to an unexplored edge on that side';
+			}
+			return true;
+		}
+
+		case 'blindJump': {
+			if (G.stage !== 'play' || !p.ship || !p.position) return 'Not during setup';
+			if (!G.sectorDeck.length) return 'No sector tiles left to explore';
+			if (G.turn.movement < 1) return 'A Blind Jump needs 1 movement';
+			if (!unexploredEdges(G.board, p.position).some((e) => e.target === args[0])) {
+				return 'Pick an unexplored space next to your ship';
 			}
 			return true;
 		}
@@ -337,6 +425,37 @@ const moves = {
 		log(G, playerID, `moved ${cost} space${cost === 1 ? '' : 's'}`);
 	}),
 
+	/**
+	 * Scan Sector (standard action, rulebook p9): 1 energy to draw a sector and place it
+	 * against the chosen unexplored side next to the ship. Ends movement.
+	 */
+	scanSector: guarded('scanSector', ({ G, playerID, random }, slot: number) => {
+		const p = G.players[playerID];
+		const edge = unexploredEdges(G.board, p.position!).find((e) => e.slot === slot)!;
+		p.ship!.energy -= 1;
+		const lost = G.turn.movement;
+		G.turn.movement = 0;
+		const name = exploreSector(G, random, edge.sectorIndex, slot);
+		log(G, playerID, `scanned past the ${SLOT_NAMES[slot]} edge (−1 energy) and found ${name}${lost ? ` (${lost} unspent movement lost)` : ''}`);
+	}),
+
+	/**
+	 * Blind Jump (minor action, rulebook p9): 1 movement to draw and place the sector
+	 * across the edge, then the ship must move into the declared hex, whatever is there.
+	 */
+	blindJump: guarded('blindJump', ({ G, playerID, random, events }, target: string) => {
+		const p = G.players[playerID];
+		const edge = unexploredEdges(G.board, p.position!).find((e) => e.target === target)!;
+		G.turn.movement -= 1;
+		const name = exploreSector(G, random, edge.sectorIndex, edge.slot);
+		p.position = target;
+		log(G, playerID, `blind jumped past the ${SLOT_NAMES[edge.slot]} edge into ${name}`);
+		if (boardHexes(G.board).get(target)?.kind === 'star') {
+			destroyShip(G, playerID, 'blind jumped into a star');
+			events.endTurn();
+		}
+	}),
+
 	/** Status Phase (simplified): refresh impulse & ability, arm markers for 1 energy each, end the turn. */
 	endTurn: guarded('endTurn', ({ G, playerID, events }, armCount: number = 0) => {
 		const ship = G.players[playerID].ship!;
@@ -382,8 +501,10 @@ const ZiaGame: Game<ZiaState> = {
 		play: {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
-				onBegin: ({ G }) => {
+				onBegin: ({ G, ctx, random }) => {
 					G.turn = { movement: 0 };
+					const p = G.players[ctx.currentPlayer];
+					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},
 			},
 			onBegin: ({ G }) => {

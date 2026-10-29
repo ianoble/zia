@@ -6,7 +6,7 @@
  * exploration spaces, mission points) will be added once the tile data arrives.
  * Edge symbols are the same on every tile, so they live in EDGE_SYMBOLS below.
  */
-import type { Axial } from '../logic/hex';
+import { hexesInRange, type Axial } from '../logic/hex';
 
 export type SpaceKind = 'spawn' | 'star';
 
@@ -33,6 +33,8 @@ export const EDGE_SYMBOL_ANCHOR = { hex: { q: 2, r: -1 } as Axial, direction: 5 
 export interface SectorSpace {
 	at: Axial;
 	kind: SpaceKind;
+	/** Spawn point number (1-20), used to pick where destroyed ships respawn. */
+	number?: number;
 }
 
 export interface SectorTileDef {
@@ -43,13 +45,25 @@ export interface SectorTileDef {
 	placeholder?: boolean;
 }
 
-/** Blank sectors with a single spawn point in the centre (placeholders). */
-export const PLACEHOLDER_SECTORS: SectorTileDef[] = [1, 2, 3, 4, 5].map((n) => ({
-	id: `blank-${n}`,
-	name: `Sector ${n}`,
-	spaces: [{ at: { q: 0, r: 0 }, kind: 'spawn' }],
-	placeholder: true,
-}));
+/** All 19 hexes of a tile (local coordinates). */
+const ALL_HEXES: Axial[] = hexesInRange({ q: 0, r: 0 }, 2);
+
+/** How many placeholder tiles exist. 1-5 are the starting sectors (seat order). */
+export const PLACEHOLDER_COUNT = 20;
+
+/**
+ * Placeholder sectors until the real tile data arrives:
+ * - 1-10: a spawn point (numbered like the tile) in the centre. 1-5 are the starting sectors.
+ * - 11-17: empty space.
+ * - 18-20: all star, so a Blind Jump can go wrong (a jump always lands on the new tile's
+ *   rim, so a star only in the centre could never be hit).
+ */
+export const PLACEHOLDER_SECTORS: SectorTileDef[] = Array.from({ length: PLACEHOLDER_COUNT }, (_, i) => {
+	const n = i + 1;
+	const spaces: SectorSpace[] =
+		n <= 10 ? [{ at: { q: 0, r: 0 }, kind: 'spawn', number: n }] : n >= 18 ? ALL_HEXES.map((at) => ({ at, kind: 'star' as const })) : [];
+	return { id: `blank-${n}`, name: n >= 18 ? `Sector ${n} (star)` : `Sector ${n}`, spaces, placeholder: true };
+});
 
 /** Centre hex plus its six neighbours (local coordinates). */
 const INNER_SEVEN: Axial[] = [

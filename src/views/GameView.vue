@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
-import { gameDef, reachableHexes } from '../logic/index';
+import { gameDef, reachableHexes, unexploredEdges } from '../logic/index';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { useMatchPlayers } from '../composables/useMatchPlayers';
@@ -82,8 +82,18 @@ const reachable = computed(() => {
 	return reachableHexes(g.board, me.position, g.turn.movement, occupied);
 });
 
+/** Off-board spaces next to my ship I can Blind Jump into (needs 1 movement and tiles left). */
+const jumpTargets = computed(() => {
+	const g = G.value;
+	if (!g || stage.value !== 'play' || !isMyTurn.value || g.turn.movement < 1 || !g.sectorDeck?.length) return null;
+	const me = g.players[props.playerID];
+	if (!me?.position) return null;
+	return unexploredEdges(g.board, me.position).map((e) => e.target);
+});
+
 function onHexClick(key: string) {
 	if (reachable.value?.has(key)) move('moveShip', key);
+	else if (jumpTargets.value?.includes(key)) move('blindJump', key);
 }
 
 function act(name: string, ...args: unknown[]) {
@@ -142,7 +152,7 @@ onUnmounted(() => disconnect());
 				<!-- Left: board, then the ship mat / setup step directly underneath -->
 				<div class="min-w-0 space-y-4">
 					<section class="h-[52vh] min-h-[380px]">
-						<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" @hex-click="onHexClick" />
+						<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable" :jump-targets="jumpTargets" @hex-click="onHexClick" />
 					</section>
 
 				<!-- Stage content -->
