@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { SECTORS_BY_ID } from '../../data/sectors';
+import EdgeSymbolGlyph from './EdgeSymbolGlyph.vue';
 import { boardHexes, edgeSymbolMarks, type BoardState } from '../../logic/board';
 import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex, parseHexKey } from '../../logic/hex';
 
@@ -255,28 +256,7 @@ function onHexClick(key: string) {
 				class="edge-symbol"
 				:data-symbol="m.symbol"
 			>
-				<title>{{ m.symbol }}</title>
-				<line v-if="m.symbol === 'line'" x1="0" y1="0" x2="34" y2="0" />
-				<template v-else-if="m.symbol === 'bar'">
-					<line x1="0" y1="0" x2="30" y2="0" />
-					<line x1="30" y1="-11" x2="30" y2="11" />
-				</template>
-				<template v-else-if="m.symbol === 'square'">
-					<line x1="0" y1="0" x2="22" y2="0" />
-					<rect x="22" y="-8" width="16" height="16" />
-				</template>
-				<template v-else-if="m.symbol === 'circle'">
-					<line x1="0" y1="0" x2="24" y2="0" />
-					<circle cx="32" cy="0" r="8" />
-				</template>
-				<template v-else-if="m.symbol === 'arrow'">
-					<line x1="0" y1="0" x2="22" y2="0" />
-					<polygon points="22,-10 22,10 40,0" />
-				</template>
-				<template v-else-if="m.symbol === 'cup'">
-					<line x1="0" y1="0" x2="22" y2="0" />
-					<path d="M 32 -10 A 10 10 0 0 0 32 10" />
-				</template>
+				<EdgeSymbolGlyph :symbol="m.symbol" />
 			</g>
 			<text v-for="s in sectorLabels" :key="`s${s.i}`" :x="s.x" :y="s.y" text-anchor="middle" class="sector-label">{{ s.name }}</text>
 

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
 import { freeEngineUseSpaces } from '../../logic/game';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
+import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import { shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
@@ -92,11 +93,11 @@ watch(
 					:key="s.slot"
 					class="action"
 					:disabled="ship.energy < 1"
-					:title="ship.energy < 1 ? 'Needs 1 energy' : `Draw a sector and place it against the ${s.name} edge (${s.symbol} symbol)`"
+					:title="ship.energy < 1 ? 'Needs 1 energy' : `Draw a sector and place it against the ${s.name} edge, matching its symbol`"
 					@click="emit('act', 'scanSector', s.slot)"
 				>
-					<span>Scan {{ s.name }} edge</span>
-					<span class="text-violet-300">{{ s.symbol }} · 1 energy</span>
+					<span class="flex items-center gap-2">Scan {{ s.name }} edge <EdgeSymbolIcon :symbol="s.symbol" class="text-violet-300" /></span>
+					<span class="text-violet-300">1 energy</span>
 				</button>
 				<p class="text-xs text-slate-500">
 					Standard action: ends movement. Or Blind Jump (minor, 1 movement): click a dashed space off the board next to your ship. You must fly
