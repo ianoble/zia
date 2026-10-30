@@ -16,16 +16,16 @@ import {
 import {
 	boardHexes,
 	dealStartingTiles,
-	entrancePath,
+	entranceStepIndex,
+	fewestShieldsRoute,
 	explorePlacement,
 	gateDestinations,
-	leavesThroughShield,
 	movePath,
-	planetEntranceOf,
 	onTigrisGate,
 	stepCrossing,
 	type BorderKind,
 	reachableHexes,
+	shieldCrossings,
 	respawnHex,
 	SLOT_NAMES,
 	startingBoard,
@@ -341,41 +341,52 @@ function flyPath(c: MoveCtx, path: string[], forced = false) {
 	}
 }
 
-/** What the captain is asked when a move from a planet would cross its shield (see planetExitChoice). */
-export interface PlanetExitChoice {
+/** What the captain is asked when the shortest route crosses a planetary shield (see entranceChoice). */
+export interface EntranceChoice {
 	/** The route through the entrance to the target, if it's in reach. */
 	viaEntrance: string[] | null;
 	/** Movement the entrance route to the target needs. */
 	entranceCost: number;
-	/** The space just outside the entrance, and whether the ship can stop there instead. */
-	outside: string;
-	canStopOutside: boolean;
-	/** Movement to fly out through the entrance and stop just outside. */
-	outsideCost: number;
+	/** The space just past the entrance on that route, where the ship can stop instead (null if it can't). */
+	stopAt: string | null;
+	/** Whether that space is on the planet (entering) or just outside it (leaving). */
+	stopInside: boolean;
+	stopCost: number;
+}
+
+/** The ship's route via the planet entrances instead of the shields, capped by its movement. */
+function entranceRoute(G: ZiaState, playerID: string, target: string, maxCost: number): string[] | null {
+	const p = G.players[playerID];
+	const path = fewestShieldsRoute(G.board, p.position!, target, new Set(G.explorationSpaces ?? []), p.bounty > 0);
+	return path && path.length <= maxCost ? path : null;
 }
 
 /**
- * A move from a planet whose usual route crosses the planetary shield: the captain may
- * prefer to leave by the entrance. Null when there's nothing to ask (not on a planet, the
- * route already uses the entrance, or the planet has no usable entrance).
+ * A move whose shortest route crosses a planetary shield (entering or leaving a planet),
+ * when a route through an entrance crosses fewer: the captain may prefer the entrance.
+ * Null when there's nothing to ask.
  */
-export function planetExitChoice(G: ZiaState, playerID: string, target: string): PlanetExitChoice | null {
+export function entranceChoice(G: ZiaState, playerID: string, target: string): EntranceChoice | null {
 	const p = G.players[playerID];
 	if (!p?.position) return null;
 	const tokens = new Set(G.explorationSpaces ?? []);
 	const outlaw = p.bounty > 0;
-	if (!leavesThroughShield(G.board, p.position, target, G.turn.movement, tokens, outlaw)) return null;
-	const e = planetEntranceOf(G.board, p.position);
-	if (!e) return null;
-	const viaEntrance = entrancePath(G.board, p.position, target, G.turn.movement, tokens, outlaw);
-	const anyRoute = viaEntrance ?? entrancePath(G.board, p.position, target, 99, tokens, outlaw);
-	const toOutside = entrancePath(G.board, p.position, e.outside, G.turn.movement, tokens, outlaw);
+	const hexes = boardHexes(G.board);
+	const shortest = movePath(G.board, p.position, target, G.turn.movement, tokens, outlaw);
+	if (!shortest) return null;
+	const shields = shieldCrossings(G.board, p.position, shortest, outlaw, hexes);
+	if (!shields) return null;
+	const alt = fewestShieldsRoute(G.board, p.position, target, tokens, outlaw);
+	if (!alt || shieldCrossings(G.board, p.position, alt, outlaw, hexes) >= shields) return null;
+	const i = entranceStepIndex(G.board, p.position, alt, outlaw, hexes);
+	const stop = i >= 0 ? alt[i] : null;
+	const canStop = !!stop && stop !== target && i + 1 <= G.turn.movement && !occupiedHexes(G, playerID).has(stop);
 	return {
-		viaEntrance,
-		entranceCost: anyRoute?.length ?? Infinity,
-		outside: e.outside,
-		canStopOutside: !!toOutside && !occupiedHexes(G, playerID).has(e.outside),
-		outsideCost: toOutside?.length ?? Infinity,
+		viaEntrance: alt.length <= G.turn.movement ? alt : null,
+		entranceCost: alt.length,
+		stopAt: canStop ? stop : null,
+		stopInside: !!stop && !!hexes.get(stop)?.kinds.includes('planet'),
+		stopCost: i + 1,
 	};
 }
 
@@ -768,7 +779,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			if (!reachableHexes(G.board, p.position, G.turn.movement, occupiedHexes(G, playerID)).has(target)) {
 				return 'Not enough movement to reach that space';
 			}
-			if (args[1] === true && !entrancePath(G.board, p.position, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)) {
+			if (args[1] === true && !entranceRoute(G, playerID, target, G.turn.movement)) {
 				return 'Not enough movement to get there through the entrance';
 			}
 			return true;
@@ -1039,12 +1050,13 @@ const moves = {
 		log(G, playerID, `fired the ${def.name}: rolled ${roll}${mods} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 
-	/** Fly to `target`. From a planet, `viaEntrance` leaves by the planet's entrance instead of crossing its shield. */
+	/** Fly to `target`. `viaEntrance` goes through planet entrances instead of crossing shields (see entranceChoice). */
 	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string, viaEntrance?: boolean) => {
 		const p = G.players[playerID];
-		const route = viaEntrance ? entrancePath : movePath;
-		const path = route(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)!;
-		log(G, playerID, `moves ${path.length} space${path.length === 1 ? '' : 's'}${viaEntrance ? ', leaving by the entrance' : ''}`);
+		const path = viaEntrance
+			? entranceRoute(G, playerID, target, G.turn.movement)!
+			: movePath(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)!;
+		log(G, playerID, `moves ${path.length} space${path.length === 1 ? '' : 's'}${viaEntrance ? ' by way of the planet entrance' : ''}`);
 		// Collecting a token is a minor action: tokens on the way are flipped without stopping.
 		flyPath({ G, playerID, random, events } as MoveCtx, path);
 	}),

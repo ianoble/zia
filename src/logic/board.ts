@@ -422,63 +422,76 @@ export function reachableHexes(board: BoardState, from: string, movement: number
 	return out;
 }
 
-/** The entrance of the planet the ship is on: the planet hex it's on, and the board hex just outside. */
-export function planetEntranceOf(board: BoardState, at: string, hexes = boardHexes(board)): { inside: string; outside: string } | null {
-	const h = hexes.get(at);
-	if (!h?.kinds.includes('planet')) return null;
-	for (const e of planetEntrances(board)) {
-		const [key, dir] = e.split(':');
-		const inner = hexes.get(key);
-		if (!inner || inner.sectorIndex !== h.sectorIndex) continue;
-		const outside = hexKey(addHex(inner.hex, HEX_DIRECTIONS[Number(dir)]));
-		const o = hexes.get(outside);
-		return o && o.kind !== 'star' ? { inside: key, outside } : null;
-	}
-	return null;
-}
-
-/**
- * Would the usual route (movePath) from a planet to `to` leave it through the planetary
- * shield rather than the entrance? Then the captain is asked which way to go.
- */
-export function leavesThroughShield(board: BoardState, from: string, to: string, maxCost: number, prefer: Set<string>, outlaw: boolean): boolean {
-	const hexes = boardHexes(board);
-	const start = hexes.get(from);
-	if (!start?.kinds.includes('planet')) return false;
-	const path = movePath(board, from, to, maxCost, prefer, outlaw);
-	if (!path) return false;
-	const entrances = planetEntrances(board);
+/** How many planetary shields a route crosses (one shield per step at most). */
+export function shieldCrossings(board: BoardState, from: string, path: string[], outlaw: boolean, hexes = boardHexes(board)): number {
 	let at = from;
+	let n = 0;
 	for (const k of path) {
-		const b = hexes.get(k);
-		if (!(b?.kinds.includes('planet') && b.sectorIndex === start.sectorIndex)) {
-			const dir = HEX_DIRECTIONS.findIndex((d) => hexKey(addHex(parseHexKey(at), d)) === k);
-			return !entrances.has(`${at}:${dir}`);
-		}
+		n += stepCrossing(board, at, k, outlaw, hexes).borders.filter((b) => b === 'shield').length;
 		at = k;
 	}
-	return false;
+	return n;
 }
 
 /**
- * Leave the planet by its entrance: fly to the entrance, out through it, then on to `to`
- * along a shortest path from there. Null if there's no usable entrance or it's out of reach.
+ * The route from `from` to `to` crossing the fewest planetary shields, i.e. using planet
+ * entrances where it can, however long it is (up to `maxCost`). Among those it takes the
+ * shortest, then the one with the fewest other borders, then the most `prefer` hexes.
+ * Returns null if `to` can't be reached.
  */
-export function entrancePath(
+export function fewestShieldsRoute(
 	board: BoardState,
 	from: string,
 	to: string,
-	maxCost: number,
 	prefer: Set<string> = new Set(),
 	outlaw = false,
+	maxCost = 60,
 ): string[] | null {
-	const e = planetEntranceOf(board, from);
-	if (!e) return null;
-	const inside = e.inside === from ? [] : movePath(board, from, e.inside, maxCost, prefer, outlaw);
-	if (!inside) return null;
-	const used = inside.length + 1;
-	if (used > maxCost) return null;
-	if (to === e.outside) return [...inside, e.outside];
-	const rest = movePath(board, e.outside, to, maxCost - used, prefer, outlaw);
-	return rest ? [...inside, e.outside, ...rest] : null;
+	const hexes = boardHexes(board);
+	// Weights: a shield outweighs any length; length outweighs other borders and tokens.
+	const weight = (a: string, b: string) => {
+		const borders = stepCrossing(board, a, b, outlaw, hexes).borders;
+		const shields = borders.filter((x) => x === 'shield').length;
+		return 1e6 * shields + 1000 + 10 * (borders.length - shields) - (prefer.has(b) ? 1 : 0);
+	};
+	const dist = new Map<string, number>([[from, 0]]);
+	const steps = new Map<string, number>([[from, 0]]);
+	const prev = new Map<string, string>();
+	const done = new Set<string>();
+	while (true) {
+		let key: string | null = null;
+		for (const [k, d] of dist) if (!done.has(k) && (key == null || d < dist.get(key)!)) key = k;
+		if (key == null || key === to) break;
+		done.add(key);
+		if (steps.get(key)! >= maxCost) continue;
+		for (const n of hexNeighbors(parseHexKey(key))) {
+			const nk = hexKey(n);
+			const h = hexes.get(nk);
+			if (!h || h.kind === 'star' || done.has(nk)) continue;
+			const d = dist.get(key)! + weight(key, nk);
+			if (d < (dist.get(nk) ?? Infinity)) {
+				dist.set(nk, d);
+				steps.set(nk, steps.get(key)! + 1);
+				prev.set(nk, key);
+			}
+		}
+	}
+	if (!dist.has(to) || to === from) return null;
+	const path = [to];
+	for (let k = prev.get(to)!; k !== from; k = prev.get(k)!) path.unshift(k);
+	return path;
+}
+
+/** Index in `path` of the first space past a planet entrance (the step goes in or out of a planet without a shield). */
+export function entranceStepIndex(board: BoardState, from: string, path: string[], outlaw: boolean, hexes = boardHexes(board)): number {
+	const planetOf = (k: string) => {
+		const h = hexes.get(k);
+		return h?.kinds.includes('planet') ? h.sectorIndex : -1;
+	};
+	let at = from;
+	for (let i = 0; i < path.length; i++) {
+		if (planetOf(at) !== planetOf(path[i]) && !stepCrossing(board, at, path[i], outlaw, hexes).borders.includes('shield')) return i;
+		at = path[i];
+	}
+	return -1;
 }
