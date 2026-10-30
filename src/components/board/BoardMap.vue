@@ -4,6 +4,7 @@ import { SECTORS_BY_ID } from '../../data/sectors';
 import EdgeSymbolGlyph from './EdgeSymbolGlyph.vue';
 import { CUBE_FILL } from '../ship/shipMatTheme';
 import { boardHexes, edgeSymbolMarks, planetEntrances, type BoardState } from '../../logic/board';
+import { BUY_MAX, BUY_PRICE, MISSION_DRAW, SELL_PRICE } from '../../logic/game';
 import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex, parseHexKey } from '../../logic/hex';
 
 /**
@@ -236,12 +237,15 @@ const hexTitles = computed(() => {
 					? 'Tigris gate (damaged): Use Gate (1 movement) to come out at the spawn point closest to a d20 roll. It can\'t be a destination.'
 					: 'Gate: Use Gate (1 movement) to jump to any space on another gate.',
 			);
-		if (k.includes('buy')) lines.push(`${tradeText(tileId, 'Buy')} (trading coming later).`);
-		if (k.includes('sell')) lines.push(`${tradeText(tileId, 'Sell')} (trading coming later).`);
+		const cr = (n: number) => `${n.toLocaleString('en-US')} cR`;
+		if (k.includes('buy'))
+			lines.push(`${tradeText(tileId, 'Buy')}: buy up to ${BUY_MAX} cubes for ${cr(BUY_PRICE)}, from the Economy Board (standard action, ends movement).`);
+		if (k.includes('sell'))
+			lines.push(`${tradeText(tileId, 'Sell')}: sell cubes for ${cr(SELL_PRICE)} each (standard action, ends movement). Selling 2 or more, and every cube you have that it buys, is a Big Shipment: +1 fame.`);
 		if (k.includes('harvest')) lines.push('Harvest space (coming later).');
 		if (k.includes('salvage')) lines.push('Salvage space (coming later).');
 		if (k.includes('mine')) lines.push('Mining space (coming later).');
-		if (k.includes('mission')) lines.push('Mission point (missions coming later).');
+		if (k.includes('mission')) lines.push(`Mission point: fly onto or over it (with a free mission slot) to draw ${MISSION_DRAW} mission cards at the end of your turn.`);
 		if (k.includes('spawn')) lines.push(`Spawn point ${h.spawnNumber ?? ''}`.trim() + '.');
 		if (k.includes('exploration')) lines.push(tokens.has(h.key) ? 'Exploration space: a face-down token, flipped by the first ship to fly onto it.' : 'Exploration space (its token has been taken).');
 		out.set(h.key, [sectorTitles.value[h.sectorIndex], ...lines].join('\n'));
