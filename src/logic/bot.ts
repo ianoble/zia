@@ -44,6 +44,7 @@ export function botDecision(G: ZiaState, seat: string, currentPlayer: string, ra
 		return { move: 'finishOutfitting', args: [] };
 	}
 
+	if (G.stage === 'play' && p.drawnMissions?.length) return { move: 'chooseMissions', args: [[p.drawnMissions[0]]] };
 	if (G.stage === 'play' && p.ship && p.pendingDamage?.length) return { move: 'placeDamage', args: [damageTargets(p.ship)[0]] };
 	if (G.stage === 'play' && p.ship && p.pendingCargo?.length) {
 		const cell = cargoTargets(p.ship)[0];

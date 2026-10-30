@@ -4,6 +4,7 @@ import { defineGame } from '@engine/client';
 import { IN_SCOPE_SHIPS, SHIPS_BY_ID } from '../data/ships';
 import { OUTFITS, OUTFITS_BY_ID, type Die } from '../data/outfits';
 import { SECTORS_BY_ID } from '../data/sectors';
+import { MISSION_CARDS } from '../data/missions';
 import {
 	EMBERS_EXPLORATION_TOKENS,
 	EXPLORATION_PAIR_CREDITS,
@@ -102,6 +103,8 @@ export function createInitialState(
 			explorationTokens: [],
 			pendingDamage: [],
 			pendingCargo: [],
+			activeMissions: [],
+			drawnMissions: [],
 		};
 	});
 
@@ -119,6 +122,8 @@ export function createInitialState(
 		sectorDeck: startingDeck(board),
 		explorationPool: [...EMBERS_EXPLORATION_TOKENS],
 		explorationSpaces: [],
+		missionDeck: MISSION_CARDS.map((m) => m.id),
+		missionDiscard: [],
 		pickOrder,
 		turnOrder,
 		supply,
@@ -333,7 +338,6 @@ export const MISSION_DRAW = 3;
  * Draw (minor action, rulebook p12): a ship that flies onto or over a mission point (once
  * per point per turn, with a free mission slot) gets to draw 3 mission cards at the end of
  * the turn. It doesn't use up any movement.
- * TODO: count active missions once mission cards exist (none can be held yet).
  */
 function queueMissionDraw(c: MoveCtx, hex: string) {
 	const { G, playerID } = c;
@@ -341,8 +345,7 @@ function queueMissionDraw(c: MoveCtx, hex: string) {
 	if (!p.ship || !boardHexes(G.board).get(hex)?.kinds.includes('mission')) return;
 	G.turn.missionDraws ??= [];
 	if (G.turn.missionDraws.includes(hex)) return;
-	const activeMissions = 0;
-	if (activeMissions >= missionLimit(p.ship)) return;
+	if ((p.activeMissions?.length ?? 0) >= missionLimit(p.ship)) return;
 	G.turn.missionDraws.push(hex);
 	log(G, playerID, `reached a mission point: will draw ${MISSION_DRAW} mission cards at the end of the turn`);
 }
@@ -470,6 +473,16 @@ function finishCrossingAfterStranding(c: MoveCtx) {
 	finishCrossing(c, true);
 }
 
+/** Draw a random mission card; the discard pile is reshuffled when the deck runs out. */
+function drawMissionCard(G: ZiaState, random: RandomApi): string | null {
+	if (!G.missionDeck.length) {
+		G.missionDeck = G.missionDiscard;
+		G.missionDiscard = [];
+	}
+	if (!G.missionDeck.length) return null;
+	return G.missionDeck.splice(random.Die(G.missionDeck.length) - 1, 1)[0];
+}
+
 /** Draw a random tile from the sector deck and place it against `sectorIndex`'s `slot` side. */
 function exploreSector(G: ZiaState, random: RandomApi, sectorIndex: number, slot: number): string {
 	const [tileId] = G.sectorDeck.splice(random.Die(G.sectorDeck.length) - 1, 1);
@@ -490,6 +503,10 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 	p.bounty = 0;
 	p.pendingDamage = [];
 	p.pendingCargo = [];
+	// Active missions and face-down mission cards are discarded (rulebook p12).
+	G.missionDiscard.push(...(p.activeMissions ?? []), ...(p.drawnMissions ?? []));
+	p.activeMissions = [];
+	p.drawnMissions = [];
 	if (p.ship) p.ship.cargo = [];
 	G.turn.movement = 0;
 	G.turn.missionDraws = [];
@@ -534,6 +551,8 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (playerID !== currentPlayer) return 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
+	// Mission cards drawn at the end of the turn: choose which to keep before anything else.
+	if (p.drawnMissions?.length && moveName !== 'chooseMissions') return 'Choose which mission cards to keep first';
 	// A move paused at a border has to be finished (or stopped) first.
 	if (G.turn.crossing && !RESOLVING_MOVES.has(moveName) && !CROSSING_MOVES.has(moveName)) {
 		return 'Finish crossing the border first (roll, or stop short)';
@@ -660,6 +679,19 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 
 		case 'acceptBorderEffect':
 			return G.turn.crossing?.stage === 'shield' ? true : 'Nothing to take';
+
+		case 'chooseMissions': {
+			if (!p.drawnMissions?.length || !p.ship) return 'No mission cards to choose from';
+			const ids = args[0];
+			if (!Array.isArray(ids) || !ids.length) return 'Keep at least one mission';
+			if (new Set(ids).size !== ids.length || ids.some((id) => !p.drawnMissions.includes(id as string))) return 'Pick from the cards you drew';
+			if (ids.length > Math.max(1, missionLimit(p.ship) - p.activeMissions.length)) return `You can keep up to ${Math.max(1, missionLimit(p.ship) - p.activeMissions.length)}`;
+			return true;
+		}
+
+		case 'discardMission':
+			if (G.stage !== 'play') return 'Not during setup';
+			return p.activeMissions?.includes(args[0] as string) ? true : 'That is not one of your active missions';
 
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
@@ -874,8 +906,34 @@ const moves = {
 		flyPath({ G, playerID, random, events } as MoveCtx, [target], true);
 	}),
 
+	/**
+	 * Status Phase, after drawing mission cards: keep at least one as an active mission (up
+	 * to the Active Mission Limit) and discard the rest, then the turn ends (rulebook p12).
+	 */
+	chooseMissions: guarded('chooseMissions', ({ G, playerID, events }, ids: string[]) => {
+		const p = G.players[playerID];
+		// Over the limit (e.g. a damaged M-Comp): the oldest active missions are dropped.
+		const overflow = Math.max(0, p.activeMissions.length + ids.length - missionLimit(p.ship!));
+		G.missionDiscard.push(...p.activeMissions.splice(0, overflow));
+		p.activeMissions.push(...ids);
+		G.missionDiscard.push(...p.drawnMissions.filter((id) => !ids.includes(id)));
+		const discarded = p.drawnMissions.length - ids.length;
+		p.drawnMissions = [];
+		log(G, playerID, `kept ${ids.length} mission${ids.length === 1 ? '' : 's'} and discarded ${discarded}`);
+		log(G, playerID, 'ended their turn');
+		events.endTurn();
+	}),
+
+	/** Jettison an active mission (allowed at any time, rulebook p12). */
+	discardMission: guarded('discardMission', ({ G, playerID }, id: string) => {
+		const p = G.players[playerID];
+		p.activeMissions = p.activeMissions.filter((m) => m !== id);
+		G.missionDiscard.push(id);
+		log(G, playerID, 'discarded an active mission');
+	}),
+
 	/** Status Phase (simplified): refresh impulse & ability, arm markers for 1 energy each, end the turn. */
-	endTurn: guarded('endTurn', ({ G, playerID, events }, armCount: number = 0) => {
+	endTurn: guarded('endTurn', ({ G, playerID, events, random }, armCount: number = 0) => {
 		const ship = G.players[playerID].ship!;
 		G.turn.movement = 0;
 		ship.impulseReady = true;
@@ -885,8 +943,19 @@ const moves = {
 			ship.energy -= armCount;
 			log(G, playerID, `armed ${armCount} marker${armCount === 1 ? '' : 's'} (−${armCount} energy)`);
 		}
-		const draws = G.turn.missionDraws?.length ?? 0;
-		if (draws) log(G, playerID, `drew ${draws * MISSION_DRAW} mission cards (choosing a mission comes later)`);
+		// Status Phase: mission cards drawn on mission points this turn are looked at now,
+		// and the captain keeps at least one (chooseMissions ends the turn).
+		const p = G.players[playerID];
+		const draws = (G.turn.missionDraws?.length ?? 0) * MISSION_DRAW;
+		for (let i = 0; i < draws; i++) {
+			const id = drawMissionCard(G, random);
+			if (id) p.drawnMissions.push(id);
+		}
+		G.turn.missionDraws = [];
+		if (p.drawnMissions.length) {
+			log(G, playerID, `drew ${p.drawnMissions.length} mission cards and is choosing which to keep`);
+			return;
+		}
 		log(G, playerID, 'ended their turn');
 		events.endTurn();
 	}),

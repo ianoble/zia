@@ -80,6 +80,50 @@ describe('mission points', () => {
 		expect(c.G().turn.missionDraws).toEqual([c.mission]);
 	});
 
+	it('at the end of the turn: draw, keep 1 (up to the limit), discard the rest, then the turn passes', () => {
+		const c = gateGame();
+		c.act('useImpulse');
+		c.act('moveShip', c.mission);
+		const deck = c.G().missionDeck.length;
+		expect(c.act('endTurn', 0)).toBe(true);
+		const me = () => c.G().players[c.seat];
+		expect(me().drawnMissions).toHaveLength(3);
+		expect(c.G().missionDeck).toHaveLength(deck - 3);
+		const [a, b] = me().drawnMissions;
+		// Still this captain's turn, and nothing else until they choose.
+		expect(c.act('endTurn', 0)).toBe(false);
+		expect(c.act('chooseMissions', [])).toBe(false);
+		expect(c.act('chooseMissions', ['not-a-card'])).toBe(false);
+		expect(c.act('chooseMissions', [a, b])).toBe(false); // limit 1
+		const seatBefore = c.seat;
+		expect(c.act('chooseMissions', [a])).toBe(true);
+		const after = c.G().players[seatBefore];
+		expect(after.activeMissions).toEqual([a]);
+		expect(after.drawnMissions).toEqual([]);
+		expect(c.G().missionDiscard).toHaveLength(2);
+		expect(c.G().turn.missionDraws).toEqual([]);
+	});
+
+	it('with a full mission slot, mission points give no draw; an active mission can be discarded', () => {
+		const c = gateGame();
+		c.act('useImpulse');
+		c.act('moveShip', c.mission);
+		c.act('endTurn', 0);
+		const kept = c.G().players[c.seat].drawnMissions[0];
+		c.act('chooseMissions', [kept]);
+		c.act('endTurn', 0); // the other captain
+		// Back to our captain, on the mission point with 1 active mission (limit 1).
+		c.act('useImpulse');
+		const off = [...reachableHexes(c.G().board, c.mission, 1, new Set())].map(([k]) => k)[0];
+		c.act('moveShip', off);
+		c.act('moveShip', c.mission);
+		expect(c.G().turn.missionDraws).toEqual([]);
+		expect(c.act('discardMission', 'nope')).toBe(false);
+		expect(c.act('discardMission', kept)).toBe(true);
+		expect(c.G().players[c.seat].activeMissions).toEqual([]);
+		expect(c.G().missionDiscard).toContain(kept);
+	});
+
 	it('Active Mission Limit: 1, +2 per undamaged M-Comp', () => {
 		const ship = createShipState('easy-tiger');
 		expect(missionLimit(ship)).toBe(1);

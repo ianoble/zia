@@ -90,6 +90,10 @@ export interface ZiaPlayer {
 	pendingDamage: DamageKind[];
 	/** Cargo cubes gained but not yet placed (or jettisoned); handled before doing anything else. */
 	pendingCargo: CubeColor[];
+	/** Active mission card ids (kept face down until revealed; hidden from others in the UI). */
+	activeMissions: string[];
+	/** Mission cards drawn at the end of the turn, waiting for the captain to choose which to keep. */
+	drawnMissions: string[];
 }
 
 export interface ZiaSetupData {
@@ -159,6 +163,9 @@ export interface ZiaState extends BaseGameState {
 	explorationPool: ExplorationToken[];
 	/** Board hexes holding a face-down exploration token. */
 	explorationSpaces: string[];
+	/** Mission cards left to draw (a random one is drawn each time) and the discard pile. */
+	missionDeck: string[];
+	missionDiscard: string[];
 	/** Setup ship-pick (and outfitting) order: highest d20 first, then counter-clockwise. */
 	pickOrder: string[];
 	/** Play order: the last captain to pick goes first, then clockwise. */

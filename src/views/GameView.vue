@@ -4,7 +4,9 @@ import { useGame, useTurnNotifications, loadSession } from '@engine/client';
 import { gameDef, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
-import { cargoTargets, damageTargets } from '../logic/ship';
+import { cargoTargets, damageTargets, missionLimit } from '../logic/ship';
+import MissionHand from '../components/missions/MissionHand.vue';
+import MissionChoice from '../components/missions/MissionChoice.vue';
 import { useMatchPlayers } from '../composables/useMatchPlayers';
 import { useBotPlayers } from '../composables/useBotPlayers';
 import BoardMap, { type BoardShip } from '../components/board/BoardMap.vue';
@@ -115,6 +117,15 @@ const MAP_COLLAPSED_KEY = 'zia:mapCollapsed';
 const mapCollapsed = ref(localStorage.getItem(MAP_COLLAPSED_KEY) === '1');
 watch(mapCollapsed, (v) => localStorage.setItem(MAP_COLLAPSED_KEY, v ? '1' : '0'));
 
+// Missions: my hand of active missions (bottom tray) and the end-of-turn choice.
+const me = computed(() => G.value?.players?.[props.playerID]);
+const myMissionLimit = computed(() => (me.value?.ship ? missionLimit(me.value.ship) : 1));
+const missionsToKeep = computed(() => Math.max(1, myMissionLimit.value - (me.value?.activeMissions?.length ?? 0)));
+const showMissionHand = computed(() => stage.value === 'play' && !!me.value?.ship);
+const HAND_COLLAPSED_KEY = 'zia:missionHandCollapsed';
+const handCollapsed = ref(localStorage.getItem(HAND_COLLAPSED_KEY) === '1');
+watch(handCollapsed, (v) => localStorage.setItem(HAND_COLLAPSED_KEY, v ? '1' : '0'));
+
 // Ship mats below the board: mine by default, tabs for the others.
 const viewedSeat = ref(props.playerID);
 watch(
@@ -160,7 +171,7 @@ onUnmounted(() => disconnect());
 </script>
 
 <template>
-	<div class="min-h-screen bg-[#05070d] text-slate-100">
+	<div class="min-h-screen bg-[#05070d] text-slate-100" :class="showMissionHand ? (handCollapsed ? 'pb-16' : 'pb-64') : ''">
 		<!-- Top bar -->
 		<header class="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3">
 			<h1 class="text-lg font-bold">{{ gameDef.displayName }}</h1>
@@ -296,6 +307,20 @@ onUnmounted(() => disconnect());
 				</aside>
 			</div>
 
+			<MissionHand
+				v-if="showMissionHand"
+				v-model:collapsed="handCollapsed"
+				:missions="me?.activeMissions ?? []"
+				:limit="myMissionLimit"
+				:can-discard="isMyTurn && !me?.drawnMissions?.length"
+				@discard="(id) => act('discardMission', id)"
+			/>
+			<MissionChoice
+				v-if="isMyTurn && me?.drawnMissions?.length"
+				:cards="me.drawnMissions"
+				:max-keep="missionsToKeep"
+				@keep="(ids) => act('chooseMissions', ids)"
+			/>
 		</template>
 	</div>
 </template>

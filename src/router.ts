@@ -11,5 +11,6 @@ export const router = createRouter({
     { path: '/game/:matchID/:playerID', component: GameView, props: true },
     { path: '/dev/ship-mat', component: () => import('./views/dev/ShipMatPreview.vue') },
     { path: '/dev/board', component: () => import('./views/dev/BoardPreview.vue') },
+    { path: '/dev/missions', component: () => import('./views/dev/MissionsPreview.vue') },
   ],
 });
