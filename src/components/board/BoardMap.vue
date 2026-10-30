@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { SECTORS_BY_ID } from '../../data/sectors';
 import EdgeSymbolGlyph from './EdgeSymbolGlyph.vue';
+import { CUBE_FILL } from '../ship/shipMatTheme';
 import { boardHexes, edgeSymbolMarks, planetEntrances, type BoardState } from '../../logic/board';
 import { HEX_DIRECTIONS, hexCorners, hexKey, hexToPixel, addHex, parseHexKey } from '../../logic/hex';
 
@@ -46,10 +47,19 @@ const hexes = computed(() =>
 				.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`)
 				.join(' '),
 			terrain: TERRAINS.find((t) => h.kinds.includes(t)) ?? null,
+			tradeFill: tradeFill(h.sectorIndex, h.kinds),
 			planetSide: planetSide(h.sectorIndex),
 		};
 	}),
 );
+
+/** Buy / Sell spaces are filled with the colour of the cube traded there (a rainbow for any colour). */
+function tradeFill(sectorIndex: number, kinds: string[]): string | null {
+	const trade = SECTORS_BY_ID[props.board.sectors[sectorIndex]?.tileId]?.trade;
+	const cube = kinds.includes('buy') ? trade?.buy : kinds.includes('sell') ? trade?.sell : undefined;
+	if (!cube) return null;
+	return cube === 'any' ? 'url(#anyCube)' : CUBE_FILL[cube];
+}
 
 /** Terrain a hex is drawn with (one per hex). */
 const TERRAINS = ['planet', 'asteroid', 'debris', 'nebula', 'gate'] as const;
@@ -329,6 +339,13 @@ function onHexClick(key: string) {
 			@pointerleave="onPointerUp"
 		>
 			<defs>
+				<linearGradient id="anyCube" x1="0" y1="0" x2="1" y2="1">
+					<stop offset="0%" :stop-color="CUBE_FILL.spice" />
+					<stop offset="25%" :stop-color="CUBE_FILL.holo" />
+					<stop offset="50%" :stop-color="CUBE_FILL.terra" />
+					<stop offset="75%" :stop-color="CUBE_FILL.plasma" />
+					<stop offset="100%" :stop-color="CUBE_FILL.cyber" />
+				</linearGradient>
 				<radialGradient id="starGlow">
 					<stop offset="0%" stop-color="#ffcf6b" stop-opacity="0.85" />
 					<stop offset="45%" stop-color="#ff8a2a" stop-opacity="0.45" />
@@ -344,6 +361,7 @@ function onHexClick(key: string) {
 					class="hex-shape"
 					:class="[{ 'star-hex': h.kind === 'star' }, h.terrain ? `terrain-${h.terrain}` : '', h.terrain === 'planet' ? h.planetSide : '']"
 				/>
+				<polygon v-if="h.tradeFill" :points="h.points" class="trade-fill" :style="{ fill: h.tradeFill }" />
 				<g v-if="h.kind === 'spawn'" class="spawn">
 					<circle :cx="h.x" :cy="h.y" r="40" />
 					<text :x="h.x" :y="h.y + 13" text-anchor="middle">{{ h.spawnNumber ?? '⟳' }}</text>
@@ -539,6 +557,10 @@ function onHexClick(key: string) {
 	font-size: 34px;
 	font-weight: 900;
 	fill: #fff;
+	pointer-events: none;
+}
+.trade-fill {
+	opacity: 0.55;
 	pointer-events: none;
 }
 .space-label {
