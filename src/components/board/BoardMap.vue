@@ -26,6 +26,8 @@ const props = defineProps<{
 	jumpTargets?: string[] | null;
 	/** Hexes holding a face-down exploration token. */
 	explorationSpaces?: string[] | null;
+	/** Reachable hexes whose route crosses a border (marked ⚠). */
+	borderWarnings?: Set<string> | null;
 }>();
 const emit = defineEmits<{ hexClick: [key: string] }>();
 
@@ -294,7 +296,7 @@ function onHexClick(key: string) {
 				<template v-for="[kind, text] in SPACE_LABELS" :key="kind">
 					<text v-if="h.kinds.includes(kind as never)" :x="h.x" :y="h.y + 10" text-anchor="middle" class="space-label">{{ text }}</text>
 				</template>
-				<text v-if="reachable?.has(h.key)" :x="h.x" :y="h.y + 78" text-anchor="middle" class="cost">{{ reachable.get(h.key) }}</text>
+				<text v-if="reachable?.has(h.key)" :x="h.x" :y="h.y + 78" text-anchor="middle" class="cost">{{ reachable.get(h.key) }}{{ borderWarnings?.has(h.key) ? ' ⚠' : '' }}</text>
 			</g>
 
 			<!-- Planet shields, nebula edges, asteroid / debris / gate outlines -->

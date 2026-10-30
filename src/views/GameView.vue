@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
-import { gameDef, reachableHexes, unexploredEdges } from '../logic/index';
+import { gameDef, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { cargoTargets, damageTargets } from '../logic/ship';
@@ -72,7 +72,7 @@ const boardShips = computed<BoardShip[]>(() =>
 
 const reachable = computed(() => {
 	const g = G.value;
-	if (!g || stage.value !== 'play' || !isMyTurn.value || g.turn.movement <= 0) return null;
+	if (!g || stage.value !== 'play' || !isMyTurn.value || g.turn.movement <= 0 || g.turn.crossing) return null;
 	const me = g.players[props.playerID];
 	if (!me?.position) return null;
 	const occupied = new Set(
@@ -83,10 +83,19 @@ const reachable = computed(() => {
 	return reachableHexes(g.board, me.position, g.turn.movement, occupied);
 });
 
+/** Reachable spaces whose route crosses a border (the map marks them with ⚠). */
+const borderWarnings = computed(() => {
+	const g = G.value;
+	const me = g?.players?.[props.playerID];
+	if (!g || !me?.position || !reachable.value) return null;
+	const tokens = new Set(g.explorationSpaces ?? []);
+	return new Set([...reachable.value.keys()].filter((k) => routeBorders(g.board, me.position!, k, g.turn.movement, tokens, me.bounty > 0) > 0));
+});
+
 /** Off-board spaces next to my ship I can Blind Jump into (needs 1 movement and tiles left). */
 const jumpTargets = computed(() => {
 	const g = G.value;
-	if (!g || stage.value !== 'play' || !isMyTurn.value || g.turn.movement < 1 || !g.sectorDeck?.length) return null;
+	if (!g || stage.value !== 'play' || !isMyTurn.value || g.turn.movement < 1 || !g.sectorDeck?.length || g.turn.crossing) return null;
 	const me = g.players[props.playerID];
 	if (!me?.position) return null;
 	return unexploredEdges(g.board, me.position).map((e) => e.target);
@@ -190,6 +199,7 @@ onUnmounted(() => disconnect());
 						<div v-show="!mapCollapsed" class="h-[52vh] min-h-[380px]">
 							<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable"
 								:jump-targets="jumpTargets"
+								:border-warnings="borderWarnings"
 								:exploration-spaces="G.explorationSpaces"
 								@hex-click="onHexClick"
 							/>

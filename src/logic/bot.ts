@@ -50,6 +50,10 @@ export function botDecision(G: ZiaState, seat: string, currentPlayer: string, ra
 		return cell ? { move: 'placeCargo', args: [cell] } : { move: 'jettisonCargo', args: [] };
 	}
 	if (G.stage === 'play' && G.turn.explorationPairPending) return { move: 'claimExplorationPair', args: ['fame'] };
+	// Then a move paused at a border: roll, and take whatever comes.
+	if (G.stage === 'play' && G.turn.crossing) {
+		return G.turn.crossing.stage === 'confirm' ? { move: 'crossBorder', args: [] } : { move: 'acceptBorderEffect', args: [] };
+	}
 
 	if (G.stage === 'play' && p.ship && p.position) {
 		// Spend movement on a random reachable space, preferring the farthest.

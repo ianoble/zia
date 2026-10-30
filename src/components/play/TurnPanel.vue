@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
-import { freeEngineUseSpaces } from '../../logic/game';
+import { freeEngineUseSpaces, usableShields } from '../../logic/game';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import { explorationTokenLabel } from '../../data/exploration';
@@ -39,6 +39,22 @@ const scanSides = computed(() => {
 });
 const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
 const pendingDamage = computed(() => props.G.players[props.playerID]?.pendingDamage ?? []);
+/** A move paused at a border. */
+const crossing = computed(() => props.G.turn.crossing ?? null);
+const BORDER_INFO: Record<string, { name: string; odds: string }> = {
+	shield: { name: 'Planetary shield', odds: '1–10: unblockable damage equal to the roll, and you stay put (−1 movement) · 11–17: through, +1,000 bounty · 18–20: through' },
+	asteroid: { name: 'Asteroid', odds: '1–10: damage equal to the roll (shields can cut it) · 11–20: safe' },
+	debris: { name: 'Debris field', odds: '1–3: ship destroyed · 4–20: safe' },
+	nebula: { name: 'Nebula', odds: '1–10: lose energy equal to the roll (shields can cut it) · 11–20: safe' },
+};
+const shieldChoices = computed(() =>
+	ship.value
+		? usableShields(ship.value).map((uid) => {
+				const o = ship.value!.outfits.find((x) => x.uid === uid)!;
+				return { uid, def: OUTFITS_BY_ID[o.outfitId] };
+			})
+		: [],
+);
 const pendingCargo = computed(() => props.G.players[props.playerID]?.pendingCargo ?? []);
 const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
@@ -55,6 +71,32 @@ watch(
 <template>
 	<div v-if="!myTurn" class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-300">
 		Waiting for <strong>{{ nameOf(currentPlayer) }}</strong> to take their turn.
+	</div>
+
+	<div v-else-if="ship && def && crossing && !pendingDamage.length && !pendingCargo.length && !pairPending" class="space-y-2 rounded-lg border border-amber-700/70 bg-slate-900/70 p-3 text-sm">
+		<template v-if="crossing.stage === 'confirm'">
+			<p class="font-semibold text-amber-200">Border ahead: {{ crossing.borders.map((b) => BORDER_INFO[b].name).join(', then ') }}</p>
+			<p v-for="b in crossing.borders" :key="b" class="text-xs text-slate-400">
+				<span class="text-slate-300">{{ BORDER_INFO[b].name }}:</span> {{ BORDER_INFO[b].odds }}
+			</p>
+			<div class="grid gap-2" :class="crossing.forced ? '' : 'grid-cols-2'">
+				<button class="action justify-center" @click="emit('act', 'crossBorder')">Roll d20</button>
+				<button v-if="!crossing.forced" class="action justify-center" @click="emit('act', 'stopMove')">Stop here</button>
+			</div>
+		</template>
+		<template v-else>
+			<p class="font-semibold text-amber-200">
+				Rolled {{ crossing.roll }}: {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }} to take
+			</p>
+			<p class="text-xs text-slate-400">Fire a shield to cut it down (uses an armed marker), or take it.</p>
+			<button v-for="s in shieldChoices" :key="s.uid" class="action" @click="emit('act', 'useShield', s.uid)">
+				<span>Fire {{ s.def.name }}</span>
+				<span class="text-sky-300">roll {{ s.def.die }}</span>
+			</button>
+			<button class="action justify-center" @click="emit('act', 'acceptBorderEffect')">
+				Take {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }}
+			</button>
+		</template>
 	</div>
 
 	<div v-else-if="ship && def && pendingDamage.length" class="space-y-2 rounded-lg border border-red-800/70 bg-slate-900/70 p-3 text-sm">

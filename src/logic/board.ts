@@ -1,6 +1,7 @@
 import { EDGE_SYMBOL_ANCHOR, EDGE_SYMBOLS, NYR_SECTOR, SECTOR_TILES, SECTORS_BY_ID, STARTING_CANDIDATES, type EdgeSymbol, type SectorSpace, type SpaceKind } from '../data/sectors';
 import {
 	addHex,
+	HEX_DIRECTIONS,
 	hexKey,
 	hexNeighbors,
 	parseHexKey,
@@ -286,41 +287,108 @@ export function movementCosts(board: BoardState, from: string, maxCost: number):
 	return costs;
 }
 
+/** A border that makes a ship roll a d20 when crossed (rulebook p10, p20). */
+export type BorderKind = 'shield' | 'asteroid' | 'debris' | 'nebula';
+
+export interface StepCrossing {
+	/** Borders crossed by this one-space step, in the order they're resolved. */
+	borders: BorderKind[];
+	/** An innocent ship using an Outlaw planet's entrance gets +1,000 bounty. */
+	entranceBounty: boolean;
+}
+
+/** Planet alignment from the tile's types. */
+function planetAlignment(board: BoardState, sectorIndex: number): 'lawful' | 'outlaw' | 'neutral' {
+	const types = SECTORS_BY_ID[board.sectors[sectorIndex]?.tileId]?.types ?? [];
+	return types.includes('Lawful') ? 'lawful' : types.includes('Outlaw') ? 'outlaw' : 'neutral';
+}
+
+/**
+ * The borders a ship crosses stepping from `from` to the adjacent `to` (rulebook p10, p20):
+ * - Planetary shield, entering or exiting, unless through the entrance. Outlaws can't use
+ *   a Lawful planet's entrance to get in (they may leave by it).
+ * - Asteroid and debris: entering any asteroid / debris space (each space has its own border).
+ * - Nebula: entering it from outside; moving around inside is free.
+ * Exiting an asteroid, debris field or nebula needs no roll.
+ */
+export function stepCrossing(board: BoardState, from: string, to: string, outlaw: boolean, hexes = boardHexes(board)): StepCrossing {
+	const a = hexes.get(from);
+	const b = hexes.get(to);
+	const out: StepCrossing = { borders: [], entranceBounty: false };
+	if (!a || !b) return out;
+	const dir = HEX_DIRECTIONS.findIndex((d) => hexKey(addHex(a.hex, d)) === to);
+	const entrances = planetEntrances(board);
+	const aPlanet = a.kinds.includes('planet');
+	const bPlanet = b.kinds.includes('planet');
+	const samePlanet = aPlanet && bPlanet && a.sectorIndex === b.sectorIndex;
+
+	const shieldCrossing = (planetHex: BoardHex, side: number, entering: boolean) => {
+		if (!entrances.has(`${planetHex.key}:${side}`)) return out.borders.push('shield');
+		const alignment = planetAlignment(board, planetHex.sectorIndex);
+		if (alignment === 'lawful' && outlaw && entering) return out.borders.push('shield');
+		if (alignment === 'outlaw' && !outlaw) out.entranceBounty = true;
+	};
+	if (aPlanet && !samePlanet) shieldCrossing(a, dir, false);
+	if (bPlanet && !samePlanet) shieldCrossing(b, (dir + 3) % 6, true);
+	if (b.kinds.includes('asteroid')) out.borders.push('asteroid');
+	if (b.kinds.includes('debris')) out.borders.push('debris');
+	if (b.kinds.includes('nebula') && !(a.kinds.includes('nebula') && a.sectorIndex === b.sectorIndex)) out.borders.push('nebula');
+	return out;
+}
+
 /**
  * The hexes a ship flies through from `from` to `to` (excluding `from`, including `to`),
- * along a shortest path. Among equally short paths it takes the one through the most
- * `prefer` hexes (face-down exploration tokens, which are collected on the way).
- * Returns null if `to` is out of reach.
+ * along a shortest path. Among equally short paths it takes the one crossing the fewest
+ * borders (see stepCrossing), then the one through the most `prefer` hexes (face-down
+ * exploration tokens, which are collected on the way). Returns null if out of reach.
  */
-export function movePath(board: BoardState, from: string, to: string, maxCost: number, prefer: Set<string> = new Set()): string[] | null {
+export function movePath(
+	board: BoardState,
+	from: string,
+	to: string,
+	maxCost: number,
+	prefer: Set<string> = new Set(),
+	outlaw = false,
+): string[] | null {
 	const costs = movementCosts(board, from, maxCost);
-	const target = costs.get(to);
-	if (target == null) return null;
-	// Most preferred hexes on a shortest path to each hex, in order of cost.
+	if (costs.get(to) == null) return null;
+	const hexes = boardHexes(board);
+	const stepScore = (a: string, b: string) => 1000 * stepCrossing(board, a, b, outlaw, hexes).borders.length - (prefer.has(b) ? 1 : 0);
+	// Lowest score (borders first, then fewest tokens missed) on a shortest path to each hex.
 	const best = new Map<string, number>([[from, 0]]);
 	const byCost = [...costs.entries()].sort((a, b) => a[1] - b[1]);
+	const preds = (key: string, cost: number) =>
+		hexNeighbors(parseHexKey(key))
+			.map(hexKey)
+			.filter((nk) => costs.get(nk) === cost - 1);
 	for (const [key, cost] of byCost) {
 		if (key === from) continue;
-		let most = -1;
-		for (const n of hexNeighbors(parseHexKey(key))) {
-			const nk = hexKey(n);
-			if (costs.get(nk) === cost - 1) most = Math.max(most, best.get(nk) ?? -1);
-		}
-		best.set(key, most + (prefer.has(key) ? 1 : 0));
+		best.set(key, Math.min(...preds(key, cost).map((nk) => best.get(nk)! + stepScore(nk, key))));
 	}
-	// Walk back from the target, always to a predecessor that keeps the best count.
+	// Walk back from the target, always to a predecessor that keeps the best score.
 	const path = [to];
 	let key = to;
 	while (key !== from) {
 		const cost = costs.get(key)!;
-		const want = best.get(key)! - (prefer.has(key) ? 1 : 0);
-		const prev = hexNeighbors(parseHexKey(key))
-			.map(hexKey)
-			.find((nk) => costs.get(nk) === cost - 1 && best.get(nk) === want)!;
+		const prev = preds(key, cost).find((nk) => best.get(nk)! + stepScore(nk, key) === best.get(key))!;
 		if (prev !== from) path.unshift(prev);
 		key = prev;
 	}
 	return path;
+}
+
+/** How many border rolls the route to `to` would take (0 if none or out of reach). */
+export function routeBorders(board: BoardState, from: string, to: string, maxCost: number, prefer: Set<string>, outlaw: boolean): number {
+	const path = movePath(board, from, to, maxCost, prefer, outlaw);
+	if (!path) return 0;
+	const hexes = boardHexes(board);
+	let at = from;
+	let n = 0;
+	for (const h of path) {
+		n += stepCrossing(board, at, h, outlaw, hexes).borders.length;
+		at = h;
+	}
+	return n;
 }
 
 /** Hexes a ship can end its move on: within movement, not its own hex, not occupied. */

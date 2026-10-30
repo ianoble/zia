@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Client } from 'boardgame.io/client';
-import { gameDef, createInitialState, PLAYER_COLORS, STARTING_CREDITS, freeEngineUseSpaces, movePath, reachableHexes } from './index';
+import { gameDef, createInitialState, PLAYER_COLORS, STARTING_CREDITS, freeEngineUseSpaces, movePath, reachableHexes, routeBorders } from './index';
 import type { ZiaState } from './types';
 import { autoPlace } from './holdGeometry';
 import { SHIPS_BY_ID } from '../data/ships';
@@ -85,12 +85,12 @@ describe('setup walkthrough and a first turn', () => {
 		expect(act('useImpulse')).toBe(false); // once per turn
 		const from = G().players[second].position!;
 		const [q, r] = from.split(',').map(Number);
-		// A space 2 away whose route has no exploration token (that would stop for a choice).
+		// A space 2 away whose route has no exploration token or border (those stop for a choice).
 		const tokens = new Set(G().explorationSpaces);
 		const target = [...reachableHexes(G().board, from, 2, new Set())]
 			.filter(([, cost]) => cost === 2)
 			.map(([k]) => k)
-			.find((k) => !movePath(G().board, from, k, 2, tokens)!.some((h) => tokens.has(h)))!;
+			.find((k) => !movePath(G().board, from, k, 2, tokens)!.some((h) => tokens.has(h)) && routeBorders(G().board, from, k, 2, tokens, false) === 0)!;
 		expect(act('moveShip', target)).toBe(true);
 		expect(G().players[second].position).toBe(target);
 		expect(G().turn.movement).toBe(1);

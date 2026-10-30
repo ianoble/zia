@@ -1,5 +1,5 @@
 import type { BaseGameState } from '@engine/client';
-import type { BoardState } from './board';
+import type { BoardState, BorderKind } from './board';
 import type { ExplorationToken } from '../data/exploration';
 
 // ---------------------------------------------------------------------------
@@ -112,6 +112,29 @@ export interface TurnState {
 	movement: number;
 	/** Two face-up exploration tokens: the captain must choose 1 fame or 2,000 credits before anything else. */
 	explorationPairPending?: boolean;
+	/** A move stopped at a border, waiting for the captain (see BorderCrossing). */
+	crossing?: BorderCrossing | null;
+}
+
+/**
+ * A move paused at a border (rulebook p10, p20). 'confirm': the captain rolls or stops
+ * short. 'shield': the roll came up 1-10 against an asteroid or nebula and the captain
+ * may fire shields to cut `amount` down before taking it.
+ */
+export interface BorderCrossing {
+	/** The space across the border(s). */
+	to: string;
+	/** Spaces left to fly after `to`. */
+	rest: string[];
+	/** Borders still to resolve for this step, in order. */
+	borders: BorderKind[];
+	entranceBounty: boolean;
+	stage: 'confirm' | 'shield';
+	/** Blind Jump: the ship must go in, so there's no stopping short. */
+	forced: boolean;
+	roll?: number;
+	/** Damage (asteroid) or energy loss (nebula) still to take. */
+	amount?: number;
 }
 
 export interface ZiaState extends BaseGameState {

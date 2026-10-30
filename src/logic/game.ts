@@ -17,6 +17,8 @@ import {
 	dealStartingTiles,
 	explorePlacement,
 	movePath,
+	stepCrossing,
+	type BorderKind,
 	reachableHexes,
 	respawnHex,
 	SLOT_NAMES,
@@ -163,8 +165,13 @@ function placementArgs(args: unknown[]): { x: number; y: number; rotation: Rotat
 
 /** Engine use spaces that are free (no marker) and undamaged. */
 export function freeEngineUseSpaces(ship: ShipState, uid: string): number[] {
+	return freeUseSpaces(ship, uid, 'engine');
+}
+
+/** Use spaces of an outfit of `type` that are free (no marker) and undamaged. */
+export function freeUseSpaces(ship: ShipState, uid: string, type: string): number[] {
 	const o = ship.outfits.find((x) => x.uid === uid);
-	if (!o || OUTFITS_BY_ID[o.outfitId].type !== 'engine') return [];
+	if (!o || OUTFITS_BY_ID[o.outfitId].type !== type) return [];
 	const damaged = damagedCells(ship);
 	return placedCells(o)
 		.filter((c) => c.kind === 'U' && !o.usedSpaces.includes(c.useIndex) && !damaged.has(cellKey(c.x, c.y)))
@@ -270,6 +277,163 @@ function collectExplorationToken(G: ZiaState, seat: string, hex: string, random:
 	return false;
 }
 
+// ---------------------------------------------------------------------------
+// Movement and borders (rulebook p8, p10, p20)
+// ---------------------------------------------------------------------------
+
+const BORDER_NAME: Record<BorderKind, string> = { shield: 'planetary shield', asteroid: 'asteroid', debris: 'debris field', nebula: 'nebula' };
+
+/** Shields that can fire now: a free undamaged use space and an armed marker. */
+export function usableShields(ship: ShipState): string[] {
+	if (ship.armedMarkers <= 0) return [];
+	return ship.outfits.filter((o) => freeUseSpaces(ship, o.uid, 'shield').length).map((o) => o.uid);
+}
+
+/**
+ * Fly along `path` one space at a time. Exploration tokens on the way are collected;
+ * at a border the move pauses (G.turn.crossing) until the captain rolls or stops short,
+ * except on a Blind Jump (`forced`), where the roll happens straight away.
+ */
+function flyPath(c: MoveCtx, path: string[], forced = false) {
+	const { G, playerID } = c;
+	const p = G.players[playerID];
+	let rest = path;
+	while (rest.length && p.position) {
+		const to = rest[0];
+		const step = stepCrossing(G.board, p.position, to, p.bounty > 0);
+		if (step.borders.length) {
+			G.turn.crossing = { to, rest: rest.slice(1), borders: step.borders, entranceBounty: step.entranceBounty, stage: 'confirm', forced };
+			log(G, playerID, `reached the ${step.borders.map((b) => BORDER_NAME[b]).join(' and ')} border`);
+			if (forced) resolveBorders(c);
+			return;
+		}
+		if (!enterSpace(c, to, step.entranceBounty)) return;
+		rest = rest.slice(1);
+	}
+}
+
+/** Move into the next space (1 movement): entrance bounty, then any exploration token. False if the move must stop. */
+function enterSpace(c: MoveCtx, to: string, entranceBounty: boolean): boolean {
+	const { G, playerID, random, events } = c;
+	const p = G.players[playerID];
+	p.position = to;
+	G.turn.movement = Math.max(0, G.turn.movement - 1);
+	if (entranceBounty && p.bounty === 0) {
+		p.bounty += 1000;
+		log(G, playerID, "used an outlaw planet's entrance: +1,000 bounty");
+	}
+	if (collectExplorationToken(G, playerID, to, random)) {
+		events.endTurn();
+		return false;
+	}
+	return p.position != null;
+}
+
+/** Roll for each border of the paused step in turn; then fly on with the rest of the path. */
+function resolveBorders(c: MoveCtx) {
+	const { G, playerID, random, events } = c;
+	const p = G.players[playerID];
+	const cross = G.turn.crossing!;
+	while (cross.borders.length) {
+		const kind = cross.borders[0];
+		const roll = random.D20();
+		if (kind === 'shield') {
+			if (roll <= 10) {
+				log(G, playerID, `rolled ${roll} crossing the planetary shield: ${roll} unblockable damage, and the ship stays put (−1 movement)`);
+				G.turn.crossing = null;
+				G.turn.movement = Math.max(0, G.turn.movement - 1);
+				if (takeDamage(G, playerID, 'damage', roll, 'the planetary shield tore it apart')) events.endTurn();
+				return;
+			}
+			if (roll <= 17) {
+				p.bounty += 1000;
+				log(G, playerID, `rolled ${roll} crossing the planetary shield: through, but detected (+1,000 bounty)`);
+			} else log(G, playerID, `rolled ${roll} crossing the planetary shield: through undetected`);
+		} else if (kind === 'debris') {
+			if (roll <= 3) {
+				log(G, playerID, `rolled ${roll} entering the debris field`);
+				G.turn.crossing = null;
+				destroyShip(G, playerID, 'smashed in a debris field');
+				events.endTurn();
+				return;
+			}
+			log(G, playerID, `rolled ${roll} entering the debris field: safely through`);
+		} else if (roll <= 10) {
+			// Asteroid damage or nebula energy loss; shields may cut it down first.
+			const what = kind === 'asteroid' ? 'damage' : 'energy loss';
+			log(G, playerID, `rolled ${roll} entering the ${BORDER_NAME[kind]}: ${roll} ${what}`);
+			cross.roll = roll;
+			cross.amount = roll;
+			if (usableShields(p.ship!).length) {
+				cross.stage = 'shield';
+				return;
+			}
+			if (!takeBorderEffect(c)) return;
+			continue;
+		} else log(G, playerID, `rolled ${roll} entering the ${BORDER_NAME[kind]}: safely through`);
+		cross.borders.shift();
+	}
+	finishCrossing(c);
+}
+
+/** The step's borders are all resolved: move into the space and carry on. */
+function finishCrossing(c: MoveCtx, stopAfter = false) {
+	const { G } = c;
+	const cross = G.turn.crossing!;
+	G.turn.crossing = null;
+	if (!enterSpace(c, cross.to, cross.entranceBounty)) return;
+	if (stopAfter) {
+		G.turn.movement = 0;
+		return;
+	}
+	flyPath(c, cross.rest);
+}
+
+/**
+ * Take what's left of an asteroid's damage or a nebula's energy loss, then carry on with
+ * the step. Returns false if the move ended here.
+ */
+function takeBorderEffect(c: MoveCtx): boolean {
+	const { G, playerID, events } = c;
+	const p = G.players[playerID];
+	const ship = p.ship!;
+	const cross = G.turn.crossing!;
+	const kind = cross.borders.shift()!;
+	const amount = cross.amount ?? 0;
+	cross.stage = 'confirm';
+	cross.amount = undefined;
+	if (kind === 'asteroid' && amount > 0) {
+		if (takeDamage(G, playerID, 'damage', amount, 'an asteroid hit filled the hold')) {
+			G.turn.crossing = null;
+			events.endTurn();
+			return false;
+		}
+	}
+	if (kind === 'nebula' && amount > 0) {
+		// Energy first, then armed markers (one per energy short). Impulse isn't affected.
+		const fromEnergy = Math.min(ship.energy, amount);
+		ship.energy -= fromEnergy;
+		const disarm = Math.min(ship.armedMarkers, amount - fromEnergy);
+		ship.armedMarkers -= disarm;
+		ship.disarmedMarkers += disarm;
+		log(G, playerID, `lost ${fromEnergy} energy${disarm ? ` and ${disarm} armed marker${disarm === 1 ? '' : 's'}` : ''} in the nebula`);
+		if (ship.energy === 0 && ship.armedMarkers === 0) {
+			log(G, playerID, 'is stranded: unspent movement is lost');
+			finishCrossingAfterStranding(c);
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Stranded in a nebula: the ship is inside it, but its movement is gone. */
+function finishCrossingAfterStranding(c: MoveCtx) {
+	const cross = c.G.turn.crossing!;
+	// Any other borders of this step would already be resolved; just enter and stop.
+	cross.borders = [];
+	finishCrossing(c, true);
+}
+
 /** Draw a random tile from the sector deck and place it against `sectorIndex`'s `slot` side. */
 function exploreSector(G: ZiaState, random: RandomApi, sectorIndex: number, slot: number): string {
 	const [tileId] = G.sectorDeck.splice(random.Die(G.sectorDeck.length) - 1, 1);
@@ -337,6 +501,10 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (playerID !== currentPlayer) return 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
+	// A move paused at a border has to be finished (or stopped) first.
+	if (G.turn.crossing && !RESOLVING_MOVES.has(moveName) && !CROSSING_MOVES.has(moveName)) {
+		return 'Finish crossing the border first (roll, or stop short)';
+	}
 	// Damage and cubes to place and exploration pairs to cash in come before anything else.
 	if (!RESOLVING_MOVES.has(moveName)) {
 		if (p.pendingDamage?.length) return 'First place your damage: click a space in your hold';
@@ -446,6 +614,20 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 		case 'jettisonCargo':
 			return p.pendingCargo?.length ? true : 'No cargo cube to jettison';
 
+		case 'crossBorder':
+			return G.turn.crossing?.stage === 'confirm' ? true : 'No border to cross';
+
+		case 'stopMove':
+			if (G.turn.crossing?.stage !== 'confirm') return 'No border to stop at';
+			return G.turn.crossing.forced ? 'A Blind Jump has to go in' : true;
+
+		case 'useShield':
+			if (G.turn.crossing?.stage !== 'shield' || !p.ship) return 'No roll to shield against';
+			return usableShields(p.ship).includes(args[0] as string) ? true : "That shield can't fire";
+
+		case 'acceptBorderEffect':
+			return G.turn.crossing?.stage === 'shield' ? true : 'Nothing to take';
+
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
 			return args[0] === 'fame' || args[0] === 'credits' ? true : 'Choose fame or credits';
@@ -464,6 +646,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 
 /** Moves that resolve something the captain must deal with first (damage, cubes, token pairs). */
 const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
+
+/** Moves for a move paused at a border. */
+const CROSSING_MOVES = new Set(['crossBorder', 'stopMove', 'useShield', 'acceptBorderEffect']);
 
 type MoveCtx = { G: ZiaState; ctx: Ctx; playerID: string; events: { endTurn: () => void }; random: RandomApi };
 
@@ -545,17 +730,48 @@ const moves = {
 
 	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string) => {
 		const p = G.players[playerID];
-		const path = movePath(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces))!;
-		G.turn.movement -= path.length;
-		log(G, playerID, `moved ${path.length} space${path.length === 1 ? '' : 's'}`);
+		const path = movePath(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)!;
+		log(G, playerID, `moves ${path.length} space${path.length === 1 ? '' : 's'}`);
 		// Collecting a token is a minor action: tokens on the way are flipped without stopping.
-		for (const hex of path) {
-			p.position = hex;
-			if (collectExplorationToken(G, playerID, hex, random)) {
-				events.endTurn();
-				return;
-			}
+		flyPath({ G, playerID, random, events } as MoveCtx, path);
+	}),
+
+	/** At a border: roll the d20 and resolve it. */
+	crossBorder: guarded('crossBorder', (c) => resolveBorders(c)),
+
+	/** At a border: stop short instead (keeping the rest of the movement). */
+	stopMove: guarded('stopMove', ({ G, playerID }) => {
+		G.turn.crossing = null;
+		log(G, playerID, 'stopped short of the border');
+	}),
+
+	/** After a bad asteroid / nebula roll: fire a shield to cut it down (Shields Up, a minor action). */
+	useShield: guarded('useShield', (c, uid: string) => {
+		const { G, playerID, random } = c;
+		const ship = G.players[playerID].ship!;
+		const cross = G.turn.crossing!;
+		const o = ship.outfits.find((x) => x.uid === uid)!;
+		const def = OUTFITS_BY_ID[o.outfitId];
+		o.usedSpaces.push(freeUseSpaces(ship, uid, 'shield')[0]);
+		ship.armedMarkers--;
+		const sides = DIE_SIDES[def.die!];
+		// Enviro-Shld on this shield: it rolls its maximum against board effects.
+		const shieldKeys = new Set(placedCells(o).map((x) => cellKey(x.x, x.y)));
+		const enviro = ship.outfits.some((m) => m.outfitId === 'enviro-shield' && placedCells(m).some((x) => shieldKeys.has(cellKey(x.x, x.y))));
+		const roll = enviro ? sides : random.Die(sides);
+		const damaged = damagedCells(ship);
+		const penalty = placedCells(o).filter((x) => damaged.has(cellKey(x.x, x.y))).length;
+		const block = Math.max(1, roll - penalty);
+		cross.amount = Math.max(0, (cross.amount ?? 0) - block);
+		log(G, playerID, `fired the ${def.name}: ${enviro ? `${sides} (Enviro-Shld)` : `rolled ${roll}`}${penalty ? ` −${penalty} damage` : ''}, blocking ${block}; ${cross.amount} left`);
+		if (cross.amount === 0 || !usableShields(ship).length) {
+			if (takeBorderEffect(c)) resolveBorders(c);
 		}
+	}),
+
+	/** After a bad asteroid / nebula roll: take what's left and fly on. */
+	acceptBorderEffect: guarded('acceptBorderEffect', (c) => {
+		if (takeBorderEffect(c)) resolveBorders(c);
 	}),
 
 	/** Place one pending damage on a hold space or outfit section of the captain's choice. */
@@ -612,16 +828,17 @@ const moves = {
 	blindJump: guarded('blindJump', ({ G, playerID, random, events }, target: string) => {
 		const p = G.players[playerID];
 		const edge = unexploredEdges(G.board, p.position!).find((e) => e.target === target)!;
-		G.turn.movement -= 1;
 		const name = exploreSector(G, random, edge.sectorIndex, edge.slot);
-		p.position = target;
 		log(G, playerID, `blind jumped past the ${SLOT_NAMES[edge.slot]} edge into ${name}`);
 		if (boardHexes(G.board).get(target)?.kind === 'star') {
+			G.turn.movement -= 1;
+			p.position = target;
 			destroyShip(G, playerID, 'blind jumped into a star');
 			events.endTurn();
-		} else if (collectExplorationToken(G, playerID, target, random)) {
-			events.endTurn();
+			return;
 		}
+		// The ship must fly into the declared space, rolling for any border on the way in.
+		flyPath({ G, playerID, random, events } as MoveCtx, [target], true);
 	}),
 
 	/** Status Phase (simplified): refresh impulse & ability, arm markers for 1 energy each, end the turn. */
@@ -670,7 +887,7 @@ const ZiaGame: Game<ZiaState> = {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
 				onBegin: ({ G, ctx, random }) => {
-					G.turn = { movement: 0, explorationPairPending: false };
+					G.turn = { movement: 0, explorationPairPending: false, crossing: null };
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},
