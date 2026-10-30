@@ -15,6 +15,7 @@ import { PLAYER_HEX } from '../components/ship/shipMatTheme';
 import ShipPicker from '../components/setup/ShipPicker.vue';
 import OutfitShop from '../components/setup/OutfitShop.vue';
 import TurnPanel from '../components/play/TurnPanel.vue';
+import EconomyBoard from '../components/play/EconomyBoard.vue';
 import ZiaLog from '../components/ZiaLog.vue';
 
 const props = defineProps<{ matchID: string; playerID: string }>();
@@ -302,6 +303,8 @@ onUnmounted(() => disconnect());
 						<span v-else-if="gameOver.winner">{{ nameOf(gameOver.winner) }} wins.</span>
 						<span v-else>Draw.</span>
 					</div>
+
+					<EconomyBoard v-if="stage === 'play'" :G="G" />
 
 					<ZiaLog :lines="G.log ?? []" :name-of="nameOf" :color-of="colorOf" />
 				</aside>

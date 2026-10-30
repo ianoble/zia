@@ -41,6 +41,11 @@ export interface PlacedOutfit {
 	usedSpaces: number[];
 }
 
+/** Cube types on the Economy Board. */
+export type EconomyCube = 'spice' | 'holo' | 'terra' | 'plasma' | 'cyber';
+export const ECONOMY_CUBES: EconomyCube[] = ['spice', 'holo', 'terra', 'plasma', 'cyber'];
+export const ECONOMY_MAX = 6;
+
 /** Normal damage or [Embers] ice damage. */
 export type DamageKind = 'damage' | 'ice';
 
@@ -163,6 +168,11 @@ export interface ZiaState extends BaseGameState {
 	explorationPool: ExplorationToken[];
 	/** Board hexes holding a face-down exploration token. */
 	explorationSpaces: string[];
+	/**
+	 * [Embers] Economy Board (rulebook p15-16): cubes available to buy per type (0-6), and
+	 * In Demand credits (0 or 1,000) waiting on empty sections.
+	 */
+	economy: Record<EconomyCube, { cubes: number; demand: number }>;
 	/** Mission cards left to draw (a random one is drawn each time) and the discard pile. */
 	missionDeck: string[];
 	missionDiscard: string[];

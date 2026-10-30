@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
-import { freeEngineUseSpaces, usableShields } from '../../logic/game';
+import { BUY_MAX, BUY_PRICE, checkMove, freeEngineUseSpaces, SELL_PRICE, sellableCubes, tradeHere, usableShields } from '../../logic/game';
+import { ECONOMY_CUBES, type EconomyCube } from '../../logic/types';
+import { CUBE_FILL } from '../ship/shipMatTheme';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import { explorationTokenLabel } from '../../data/exploration';
@@ -57,6 +59,21 @@ const shieldChoices = computed(() =>
 			})
 		: [],
 );
+/** Trade at a planet's Buy / Sell space. */
+const trade = computed(() => tradeHere(props.G, props.playerID));
+const buyColors = computed<EconomyCube[]>(() => {
+	const b = trade.value?.buy;
+	if (!b) return [];
+	return b === 'any' ? ECONOMY_CUBES : [b];
+});
+const canBuy = (color: EconomyCube, n: number) => checkMove(props.G, props.playerID, props.currentPlayer, 'buyCargo', [color, n]) === true;
+const sellable = computed(() => (ship.value && trade.value?.sell ? sellableCubes(ship.value, trade.value.sell) : []));
+/** Selling by colour: all of them (a Big Shipment if 2+), or one at a time. */
+const sellGroups = computed(() => {
+	const by = new Map<string, string[]>();
+	for (const c of sellable.value) by.set(c.color, [...(by.get(c.color) ?? []), c.cell]);
+	return [...by.entries()].map(([color, cells]) => ({ color, cells }));
+});
 const pendingCargo = computed(() => props.G.players[props.playerID]?.pendingCargo ?? []);
 const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
@@ -192,6 +209,39 @@ watch(
 			<p v-if="!(scanSides.length && deckLeft)" class="text-xs text-slate-500">
 				{{ deckLeft ? 'Move next to an unexplored edge (the outer rim of the map) to Scan or Blind Jump.' : 'Every sector has been explored.' }}
 			</p>
+		</div>
+
+		<div v-if="trade" class="space-y-2 rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-2">
+			<span class="font-semibold text-slate-300">Trade</span>
+			<template v-if="trade.buy">
+				<p class="text-xs text-slate-400">
+					Buy space: up to {{ BUY_MAX }} cubes for {{ BUY_PRICE.toLocaleString('en-US') }} cR (standard action, ends movement).
+				</p>
+				<div v-for="c in buyColors" :key="c" class="flex items-center gap-2">
+					<span class="h-3.5 w-3.5 rounded-sm" :style="{ background: CUBE_FILL[c] }" />
+					<span class="flex-1 capitalize">{{ c }} <span class="text-xs text-slate-500">({{ G.economy?.[c]?.cubes ?? 0 }} left)</span></span>
+					<button class="step px-2" :disabled="!canBuy(c, 1)" @click="emit('act', 'buyCargo', c, 1)">Buy 1</button>
+					<button class="step px-2" :disabled="!canBuy(c, 2)" @click="emit('act', 'buyCargo', c, 2)">Buy 2</button>
+				</div>
+			</template>
+			<template v-if="trade.sell">
+				<p class="text-xs text-slate-400">
+					Sell space: buys {{ trade.sell === 'any' ? 'any cube' : trade.sell }} at {{ SELL_PRICE.toLocaleString('en-US') }} cR each (standard
+					action). Selling all of them (2+) is a Big Shipment: +1 fame.
+				</p>
+				<p v-if="!sellable.length" class="text-xs text-slate-500">You have no cubes this planet buys.</p>
+				<button v-if="sellable.length >= 2" class="action" @click="emit('act', 'sellCargo', sellable.map((c) => c.cell))">
+					<span>Sell all {{ sellable.length }}</span>
+					<span class="text-amber-300">+{{ (SELL_PRICE * sellable.length).toLocaleString('en-US') }} cR, +1 fame</span>
+				</button>
+				<button v-for="g in sellGroups" :key="g.color" class="action" @click="emit('act', 'sellCargo', [g.cells[0]])">
+					<span class="flex items-center gap-2">
+						<span class="h-3.5 w-3.5 rounded-sm" :style="{ background: CUBE_FILL[g.color as EconomyCube] }" />
+						Sell 1 {{ g.color }}
+					</span>
+					<span class="text-amber-300">+{{ SELL_PRICE.toLocaleString('en-US') }} cR</span>
+				</button>
+			</template>
 		</div>
 
 		<div class="space-y-2 border-t border-slate-800 pt-3">

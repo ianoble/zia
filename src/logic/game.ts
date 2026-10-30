@@ -3,7 +3,7 @@ import { INVALID_MOVE, TurnOrder } from 'boardgame.io/core';
 import { defineGame } from '@engine/client';
 import { IN_SCOPE_SHIPS, SHIPS_BY_ID } from '../data/ships';
 import { OUTFITS, OUTFITS_BY_ID, type Die } from '../data/outfits';
-import { SECTORS_BY_ID } from '../data/sectors';
+import { SECTORS_BY_ID, type TradeCube } from '../data/sectors';
 import { MISSION_CARDS } from '../data/missions';
 import {
 	EMBERS_EXPLORATION_TOKENS,
@@ -31,9 +31,12 @@ import {
 import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
 import { applyDamage, cargoTargets, createShipState, damagedCells, damageTargets, engineRollResult, maxDamage, missionLimit, shipDef, totalDamage } from './ship';
 import {
+	ECONOMY_CUBES,
+	ECONOMY_MAX,
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
 	type CubeColor,
+	type EconomyCube,
 	type DamageKind,
 	type PlacedOutfit,
 	type Rotation,
@@ -122,6 +125,8 @@ export function createInitialState(
 		sectorDeck: startingDeck(board),
 		explorationPool: [...EMBERS_EXPLORATION_TOKENS],
 		explorationSpaces: [],
+		// Setup step 7 [E]: roll a d6 for each cube type's starting cubes on the Economy Board.
+		economy: Object.fromEntries(ECONOMY_CUBES.map((c) => [c, { cubes: die(6), demand: 0 }])) as ZiaState['economy'],
 		missionDeck: MISSION_CARDS.map((m) => m.id),
 		missionDiscard: [],
 		pickOrder,
@@ -473,6 +478,41 @@ function finishCrossingAfterStranding(c: MoveCtx) {
 	finishCrossing(c, true);
 }
 
+// ---------------------------------------------------------------------------
+// Trade (rulebook p15-16): buy and sell cubes at a planet's Buy / Sell space
+// ---------------------------------------------------------------------------
+
+export const BUY_PRICE = 1000;
+export const BUY_MAX = 2;
+export const SELL_PRICE = 1000;
+
+/** The trade on the space the captain's ship is on, with the planet tile. */
+export function tradeHere(G: ZiaState, seat: string): { buy?: TradeCube; sell?: TradeCube; tileId: string } | null {
+	const pos = G.players[seat]?.position;
+	const h = pos ? boardHexes(G.board).get(pos) : null;
+	if (!h || !(h.kinds.includes('buy') || h.kinds.includes('sell'))) return null;
+	const tile = SECTORS_BY_ID[G.board.sectors[h.sectorIndex].tileId];
+	return {
+		tileId: tile.id,
+		...(h.kinds.includes('buy') && tile.trade?.buy ? { buy: tile.trade.buy } : {}),
+		...(h.kinds.includes('sell') && tile.trade?.sell ? { sell: tile.trade.sell } : {}),
+	};
+}
+
+/** Cubes in the hold this Sell space will buy. */
+export function sellableCubes(ship: ShipState, sell: TradeCube): ShipState['cargo'] {
+	return ship.cargo.filter((c) => c.color !== 'ember' && (sell === 'any' || c.color === sell));
+}
+
+/** Free hold room for cubes, after cubes already waiting to be placed. */
+const cargoRoom = (p: ZiaPlayer) => cargoTargets(p.ship!).length - p.pendingCargo.length;
+
+/** A standard action ends movement: unspent movement is lost. */
+function endMovement(G: ZiaState, seat: string) {
+	if (G.turn.movement > 0) log(G, seat, `(${G.turn.movement} unspent movement lost)`);
+	G.turn.movement = 0;
+}
+
 /** Draw a random mission card; the discard pile is reshuffled when the deck runs out. */
 function drawMissionCard(G: ZiaState, random: RandomApi): string | null {
 	if (!G.missionDeck.length) {
@@ -692,6 +732,31 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 		case 'discardMission':
 			if (G.stage !== 'play') return 'Not during setup';
 			return p.activeMissions?.includes(args[0] as string) ? true : 'That is not one of your active missions';
+
+		case 'buyCargo': {
+			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
+			const trade = tradeHere(G, playerID);
+			if (!trade?.buy) return 'Fly to a planet\'s Buy space to buy cubes';
+			const [color, count] = args as [EconomyCube, number];
+			if (!ECONOMY_CUBES.includes(color)) return 'Pick a cube colour';
+			if (trade.buy !== 'any' && trade.buy !== color) return `This planet only sells ${trade.buy}`;
+			if (count !== 1 && count !== 2) return `Buy 1 or ${BUY_MAX} cubes`;
+			if (p.credits < BUY_PRICE) return `Buying costs ${BUY_PRICE.toLocaleString('en-US')} credits`;
+			if (G.economy[color].cubes < count) return `Only ${G.economy[color].cubes} ${color} left on the Economy Board`;
+			if (cargoRoom(p) < count) return 'Not enough room in your hold';
+			return true;
+		}
+
+		case 'sellCargo': {
+			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
+			const trade = tradeHere(G, playerID);
+			if (!trade?.sell) return 'Fly to a planet\'s Sell space to sell cubes';
+			const cells = args[0];
+			if (!Array.isArray(cells) || !cells.length) return 'Pick cubes to sell';
+			const sellable = new Set(sellableCubes(p.ship, trade.sell).map((c) => c.cell));
+			if (new Set(cells).size !== cells.length || cells.some((c) => !sellable.has(c as string))) return 'This planet doesn\'t buy those cubes';
+			return true;
+		}
 
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
@@ -924,6 +989,54 @@ const moves = {
 		events.endTurn();
 	}),
 
+	/**
+	 * Buy (standard action): up to 2 of the planet's cubes for 1,000, from the Economy
+	 * Board. The captain places them in the hold. Repeatable while credits and room last.
+	 */
+	buyCargo: guarded('buyCargo', ({ G, playerID }, color: EconomyCube, count: number) => {
+		const p = G.players[playerID];
+		p.credits -= BUY_PRICE;
+		G.economy[color].cubes -= count;
+		for (let i = 0; i < count; i++) gainCargo(G, playerID, color);
+		log(G, playerID, `bought ${count} ${color} cube${count === 1 ? '' : 's'} for ${BUY_PRICE.toLocaleString('en-US')} credits`);
+		endMovement(G, playerID);
+	}),
+
+	/**
+	 * Sell (standard action): 1,000 per cube the planet buys. Selling a Big Shipment (2+
+	 * cubes and every cube this space buys) earns 1 fame. The planet consumes the cubes
+	 * and produces its own type onto the Economy Board (max 6), claiming any In Demand
+	 * credits for the seller.
+	 */
+	sellCargo: guarded('sellCargo', ({ G, playerID }, cells: string[]) => {
+		const p = G.players[playerID];
+		const ship = p.ship!;
+		const trade = tradeHere(G, playerID)!;
+		const all = sellableCubes(ship, trade.sell!).length;
+		const sold = ship.cargo.filter((c) => cells.includes(c.cell));
+		ship.cargo = ship.cargo.filter((c) => !cells.includes(c.cell));
+		p.credits += SELL_PRICE * sold.length;
+		const big = sold.length >= 2 && sold.length === all;
+		if (big) p.fame++;
+		log(G, playerID, `sold ${sold.length} cube${sold.length === 1 ? '' : 's'} for ${(SELL_PRICE * sold.length).toLocaleString('en-US')} credits${big ? ' (Big Shipment: +1 fame)' : ''}`);
+		// Produce: Loath (sells 'any') never produces; a planet produces the cube type it sells to captains.
+		const produce = SECTORS_BY_ID[trade.tileId].trade?.buy;
+		if (produce && produce !== 'any') {
+			const section = G.economy[produce];
+			let made = 0;
+			for (let i = 0; i < sold.length && section.cubes < ECONOMY_MAX; i++) {
+				section.cubes++;
+				made++;
+			}
+			if (made && section.demand) {
+				p.credits += section.demand;
+				log(G, playerID, `produced ${produce}, which was In Demand: +${section.demand.toLocaleString('en-US')} credits`);
+				section.demand = 0;
+			}
+		}
+		endMovement(G, playerID);
+	}),
+
 	/** Jettison an active mission (allowed at any time, rulebook p12). */
 	discardMission: guarded('discardMission', ({ G, playerID }, id: string) => {
 		const p = G.players[playerID];
@@ -943,6 +1056,8 @@ const moves = {
 			ship.energy -= armCount;
 			log(G, playerID, `armed ${armCount} marker${armCount === 1 ? '' : 's'} (−${armCount} energy)`);
 		}
+		// Status step 6 [E] In Demand: every empty Economy Board section gets 1,000 credits (max 1,000).
+		for (const c of ECONOMY_CUBES) if (G.economy[c].cubes === 0) G.economy[c].demand = 1000;
 		// Status Phase: mission cards drawn on mission points this turn are looked at now,
 		// and the captain keeps at least one (chooseMissions ends the turn).
 		const p = G.players[playerID];

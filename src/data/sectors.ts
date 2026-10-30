@@ -56,6 +56,20 @@ export interface SectorSpace {
 	number?: number;
 }
 
+/** Cube types traded at planets ('any' = every colour). */
+export type TradeCube = 'spice' | 'holo' | 'terra' | 'plasma' | 'cyber' | 'any';
+const CUBE_LETTERS: Record<string, TradeCube> = { S: 'spice', H: 'holo', T: 'terra', P: 'plasma', C: 'cyber', Any: 'any' };
+
+/** "Buy P" / "Sell Any" features → structured trade. */
+function parseTrade(features: string[]): SectorTileDef['trade'] {
+	const trade: NonNullable<SectorTileDef['trade']> = {};
+	for (const f of features) {
+		const [verb, what] = f.split(' ');
+		if ((verb === 'Buy' || verb === 'Sell') && CUBE_LETTERS[what]) trade[verb === 'Buy' ? 'buy' : 'sell'] = CUBE_LETTERS[what];
+	}
+	return trade.buy || trade.sell ? trade : undefined;
+}
+
 export type SectorType =
 	| 'Lawful'
 	| 'Neutral'
@@ -91,6 +105,12 @@ export interface SectorTileDef {
 	spaces: SectorSpace[];
 	/** True until the tile's real hex layout (where each feature sits) is entered. */
 	layoutPlaceholder: boolean;
+	/**
+	 * Planet trade (from the listing's "Buy X" / "Sell X"): the cube type sold to captains
+	 * at the Buy space and bought at the Sell space ('any' for any colour). A planet
+	 * produces its Buy type when it consumes cubes (Loath and Smugglers' Den never do).
+	 */
+	trade?: { buy?: TradeCube; sell?: TradeCube };
 	/** Planetary entrance: the shield edge on the `direction` side (HEX_DIRECTIONS index) of planet hex `at`. */
 	entrance?: { at: Axial; direction: number };
 }
@@ -276,6 +296,8 @@ export const SECTOR_TILES: SectorTileDef[] = TILE_ROWS.map(([number, name, short
 });
 
 for (const t of SECTOR_TILES) {
+	const trade = parseTrade(t.features);
+	if (trade) t.trade = trade;
 	const side = PLANET_ENTRANCES[t.number];
 	const edge = side ? entranceEdge(t.spaces, side) : null;
 	if (edge) t.entrance = edge;
