@@ -113,7 +113,7 @@ export interface TurnState {
 	/** Two face-up exploration tokens: the captain must choose 1 fame or 2,000 credits before anything else. */
 	explorationPairPending?: boolean;
 	/**
-	 * Mission points the captain stopped on this turn (once per point): each lets them
+	 * Mission points the ship flew onto or over this turn (once per point): each lets them
 	 * draw 3 mission cards at the end of the turn (rulebook p12).
 	 */
 	missionDraws?: string[];

@@ -37,7 +37,7 @@ const scanSides = computed(() => {
 		.filter((e) => !seen.has(e.slot) && seen.add(e.slot))
 		.map((e) => ({ slot: e.slot, name: SLOT_NAMES[e.slot], symbol: edgeSymbolFacing(props.G.board.sectors[e.sectorIndex].rotation, e.slot) }));
 });
-/** Mission cards queued for the end of the turn (3 per mission point stopped on). */
+/** Mission cards queued for the end of the turn (3 per mission point flown onto or over). */
 const missionCards = computed(() => (props.G.turn.missionDraws?.length ?? 0) * 3);
 const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
 const pendingDamage = computed(() => props.G.players[props.playerID]?.pendingDamage ?? []);

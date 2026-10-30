@@ -324,29 +324,27 @@ function flyPath(c: MoveCtx, path: string[], forced = false) {
 		if (!enterSpace(c, to, step.entranceBounty)) return;
 		rest = rest.slice(1);
 	}
-	stoppedAt(c);
 }
 
 /** Cards drawn per mission point (rulebook p12). */
 export const MISSION_DRAW = 3;
 
 /**
- * The ship's move ended where it is. On a mission point (once per point per turn, with a
- * free mission slot) the captain gets to draw 3 mission cards at the end of the turn.
- * It doesn't use up any movement: the captain can keep moving.
+ * Draw (minor action, rulebook p12): a ship that flies onto or over a mission point (once
+ * per point per turn, with a free mission slot) gets to draw 3 mission cards at the end of
+ * the turn. It doesn't use up any movement.
  * TODO: count active missions once mission cards exist (none can be held yet).
  */
-function stoppedAt(c: MoveCtx) {
+function queueMissionDraw(c: MoveCtx, hex: string) {
 	const { G, playerID } = c;
 	const p = G.players[playerID];
-	if (!p.position || !p.ship) return;
-	if (!boardHexes(G.board).get(p.position)?.kinds.includes('mission')) return;
+	if (!p.ship || !boardHexes(G.board).get(hex)?.kinds.includes('mission')) return;
 	G.turn.missionDraws ??= [];
-	if (G.turn.missionDraws.includes(p.position)) return;
+	if (G.turn.missionDraws.includes(hex)) return;
 	const activeMissions = 0;
 	if (activeMissions >= missionLimit(p.ship)) return;
-	G.turn.missionDraws.push(p.position);
-	log(G, playerID, `stopped on a mission point: will draw ${MISSION_DRAW} mission cards at the end of the turn`);
+	G.turn.missionDraws.push(hex);
+	log(G, playerID, `reached a mission point: will draw ${MISSION_DRAW} mission cards at the end of the turn`);
 }
 
 /** Move into the next space (1 movement): entrance bounty, then any exploration token. False if the move must stop. */
@@ -359,6 +357,7 @@ function enterSpace(c: MoveCtx, to: string, entranceBounty: boolean): boolean {
 		p.bounty += 1000;
 		log(G, playerID, "used an outlaw planet's entrance: +1,000 bounty");
 	}
+	queueMissionDraw(c, to);
 	if (collectExplorationToken(G, playerID, to, random)) {
 		events.endTurn();
 		return false;
@@ -380,7 +379,6 @@ function resolveBorders(c: MoveCtx) {
 				G.turn.crossing = null;
 				G.turn.movement = Math.max(0, G.turn.movement - 1);
 				if (takeDamage(G, playerID, 'damage', roll, 'the planetary shield tore it apart')) events.endTurn();
-				else stoppedAt(c);
 				return;
 			}
 			if (roll <= 17) {
@@ -422,7 +420,6 @@ function finishCrossing(c: MoveCtx, stopAfter = false) {
 	if (!enterSpace(c, cross.to, cross.entranceBounty)) return;
 	if (stopAfter) {
 		G.turn.movement = 0;
-		stoppedAt(c);
 		return;
 	}
 	flyPath(c, cross.rest);
@@ -779,7 +776,6 @@ const moves = {
 	stopMove: guarded('stopMove', (c) => {
 		c.G.turn.crossing = null;
 		log(c.G, c.playerID, 'stopped short of the border');
-		stoppedAt(c);
 	}),
 
 	/** After a bad asteroid / nebula roll: fire a shield to cut it down (Shields Up, a minor action). */
