@@ -3,8 +3,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { OUTFITS, OUTFITS_BY_ID, type OutfitDef, type OutfitType } from '../../data/outfits';
 import { autoPlace, occupancy, parseCellKey, parseShape, transformCells } from '../../logic/holdGeometry';
 import { checkMove, outfitSellPrice } from '../../logic/game';
-import { cargoTargets } from '../../logic/ship';
-import { shipDef } from '../../logic/ship';
+import { cargoTargets, createShipState, shipDef } from '../../logic/ship';
+import { SHIPS_BY_ID } from '../../data/ships';
 import type { PlayerColor, Rotation, ZiaState } from '../../logic/types';
 import ShipMat from '../ship/ShipMat.vue';
 import type { HoldGhost } from '../ship/HoldGrid.vue';
@@ -15,6 +15,8 @@ import { OUTFIT_FILL, CONNECTOR_FILL } from '../ship/shipMatTheme';
  * Pick an outfit, move over the hold to preview it, R rotates, F flips, click to place.
  * Click a placed outfit to move it, or return it (full refund during setup; sold for half,
  * rounded up, at a starport). At a starport, click a cube and then a free space to move it.
+ * 'upgrade' mode: buying a new ship. The hold shown is the new ship's; place each outfit
+ * from the list (or sell it), then complete the purchase.
  */
 const props = withDefaults(
 	defineProps<{
@@ -23,18 +25,42 @@ const props = withDefaults(
 		currentPlayer: string;
 		color: PlayerColor;
 		captainName: string;
-		mode?: 'setup' | 'starport';
+		mode?: 'setup' | 'starport' | 'upgrade';
 	}>(),
 	{ mode: 'setup' },
 );
 const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; close: [] }>();
-const atStarport = computed(() => props.mode === 'starport');
+const atStarport = computed(() => props.mode !== 'setup');
+const upgrading = computed(() => props.mode === 'upgrade' && !!me.value.upgrade);
 /** Starport: a cube picked up to move elsewhere in the hold. */
 const movingCube = ref<string | null>(null);
 const cubeTargets = computed(() => (movingCube.value ? cargoTargets(ship.value) : null));
 
 const me = computed(() => props.G.players[props.playerID]);
-const ship = computed(() => me.value.ship!);
+/** The hold being worked on: the current ship, or (buying a ship) the new one with its outfits so far. */
+const ship = computed(() =>
+	upgrading.value ? { ...createShipState(me.value.upgrade!.shipId), outfits: me.value.upgrade!.layout } : me.value.ship!,
+);
+const newShipName = computed(() => (me.value.upgrade ? SHIPS_BY_ID[me.value.upgrade.shipId].name : ''));
+const newShipPrice = computed(() => (me.value.upgrade ? SHIPS_BY_ID[me.value.upgrade.shipId].price : 0));
+/** Buying a ship: outfits not yet placed in the new hold. */
+const unplaced = computed(() => {
+	if (!upgrading.value) return [];
+	const placed = new Set(me.value.upgrade!.layout.map((o) => o.uid));
+	return me.value.ship!.outfits.filter((o) => !placed.has(o.uid));
+});
+const completeCheck = computed(() => checkMove(props.G, props.playerID, props.currentPlayer, 'completeShipUpgrade', []));
+
+function startPlace(uid: string, outfitId: string) {
+	placing.value = { kind: 'move', uid, outfitId };
+	selectedUid.value = null;
+	rotation.value = 0;
+	flipped.value = false;
+	message.value = '';
+}
+function sellUnplaced(uid: string) {
+	emit('act', 'returnOutfit', uid);
+}
 const myTurn = computed(() => props.playerID === props.currentPlayer);
 
 type Placing = { kind: 'buy'; outfitId: string } | { kind: 'move'; uid: string; outfitId: string };
@@ -105,7 +131,7 @@ const candidate = computed(() => {
 	const check =
 		placing.value.kind === 'buy'
 			? checkMove(props.G, props.playerID, props.currentPlayer, 'buyOutfit', [def.id, ...args])
-			: checkMove(props.G, props.playerID, props.currentPlayer, 'moveOutfit', [placing.value.uid, ...args]);
+			: checkMove(props.G, props.playerID, props.currentPlayer, upgrading.value ? 'upgradePlaceOutfit' : 'moveOutfit', [placing.value.uid, ...args]);
 	return { def, cells: cells.map((c) => ({ x: c.x + x, y: c.y + y, kind: c.kind })), args, check };
 });
 
@@ -123,14 +149,14 @@ function onCellClick(key: string) {
 			return;
 		}
 		if (placing.value.kind === 'buy') emit('act', 'buyOutfit', placing.value.outfitId, ...c.args);
-		else emit('act', 'moveOutfit', placing.value.uid, ...c.args);
+		else emit('act', upgrading.value ? 'upgradePlaceOutfit' : 'moveOutfit', placing.value.uid, ...c.args);
 		placing.value = null;
 		selectedUid.value = null;
 		message.value = '';
 		return;
 	}
 	// Starport: move a cube (click it, then click a free space).
-	if (atStarport.value) {
+	if (atStarport.value && !upgrading.value) {
 		if (movingCube.value) {
 			if (cubeTargets.value?.includes(key)) emit('act', 'moveCargo', movingCube.value, key);
 			movingCube.value = null;
@@ -215,7 +241,8 @@ const credits = (n: number) => n.toLocaleString('en-US');
 				<template v-else-if="selected">
 					<span class="font-semibold">{{ OUTFITS_BY_ID[selected.outfitId].name }}</span>
 					<button class="btn" @click="startMove">Move</button>
-					<button class="btn" @click="returnSelected">
+					<button v-if="upgrading" class="btn" @click="emit('act', 'upgradeUnplace', selected.uid); selectedUid = null">Take out</button>
+					<button v-if="!upgrading" class="btn" @click="returnSelected">
 						{{ atStarport ? 'Sell' : 'Return' }} (+{{ credits(atStarport ? outfitSellPrice(selected.outfitId) : OUTFITS_BY_ID[selected.outfitId].cost) }} cR)
 					</button>
 					<button class="btn" @click="selectedUid = null">Deselect</button>
@@ -229,8 +256,46 @@ const credits = (n: number) => n.toLocaleString('en-US');
 			</div>
 		</div>
 
+		<!-- Buying a ship: outfits to place, then pay -->
+		<aside v-if="upgrading" class="space-y-3 rounded-xl border border-violet-800/70 bg-slate-900/80 p-4">
+			<div class="flex items-baseline justify-between">
+				<h3 class="text-lg font-bold">Fitting out the {{ newShipName }}</h3>
+				<span class="text-xl font-black text-amber-300">{{ credits(me.credits) }} <span class="text-sm">cR</span></span>
+			</div>
+			<p class="text-xs text-slate-400">
+				Place every outfit in the new hold (or sell it), then buy the ship. Damage and bounty stay with the old ship; your cubes are placed
+				again after.
+			</p>
+			<div v-if="unplaced.length" class="space-y-1.5">
+				<h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">To place ({{ unplaced.length }})</h4>
+				<div v-for="o in unplaced" :key="o.uid" class="flex items-center gap-2">
+					<button
+						type="button"
+						class="shop-item flex-1"
+						:class="{ active: placing?.kind === 'move' && placing.uid === o.uid }"
+						@click="startPlace(o.uid, o.outfitId)"
+					>
+						<span class="flex-1 text-left">{{ OUTFITS_BY_ID[o.outfitId].name }}</span>
+						<span class="text-slate-400">Place</span>
+					</button>
+					<button type="button" class="btn text-xs" @click="sellUnplaced(o.uid)">Sell +{{ credits(outfitSellPrice(o.outfitId)) }}</button>
+				</div>
+			</div>
+			<p v-else class="text-sm text-emerald-300">Every outfit is placed.</p>
+			<button
+				type="button"
+				class="w-full rounded-lg bg-violet-600 py-2.5 font-semibold transition-colors hover:bg-violet-500 disabled:opacity-40"
+				:disabled="completeCheck !== true"
+				:title="completeCheck === true ? '' : completeCheck"
+				@click="emit('act', 'completeShipUpgrade')"
+			>
+				Buy the {{ newShipName }} ({{ credits(newShipPrice) }} cR, +1 fame)
+			</button>
+			<button type="button" class="btn w-full" @click="emit('act', 'cancelShipUpgrade')">Cancel</button>
+		</aside>
+
 		<!-- Shop -->
-		<aside class="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
+		<aside v-else class="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
 			<div class="flex items-baseline justify-between">
 				<h3 class="text-lg font-bold">Outfitters</h3>
 				<span class="text-xl font-black text-amber-300">{{ credits(me.credits) }} <span class="text-sm">cR</span></span>

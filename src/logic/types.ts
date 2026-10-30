@@ -70,6 +70,16 @@ export interface ShipState {
 	/** [Embers] Cell keys holding an ice damage gem. */
 	iceDamage: string[];
 	cargo: CargoInHold[];
+	/** Ship ability cards kept from earlier ships (all of them transfer when buying a new ship). */
+	keptAbilities?: { shipId: string; abilityIndex: number }[];
+}
+
+/** A ship being bought at a starport: the new ship and the outfits placed in its hold so far. */
+export interface ShipUpgrade {
+	shipId: string;
+	abilityIndex: number;
+	/** Outfits (same uids as on the current ship) placed in the new hold. */
+	layout: PlacedOutfit[];
 }
 
 export interface ZiaPlayer {
@@ -99,6 +109,8 @@ export interface ZiaPlayer {
 	activeMissions: string[];
 	/** Mission cards drawn at the end of the turn, waiting for the captain to choose which to keep. */
 	drawnMissions: string[];
+	/** Buying a new ship at a starport: fitting the outfits into its hold. */
+	upgrade?: ShipUpgrade | null;
 }
 
 export interface ZiaSetupData {
@@ -175,6 +187,8 @@ export interface ZiaState extends BaseGameState {
 	 * In Demand credits (0 or 1,000) waiting on empty sections.
 	 */
 	economy: Record<EconomyCube, { cubes: number; demand: number }>;
+	/** Ships traded in for a better one: removed from the game (rulebook p18). */
+	retiredShips?: string[];
 	/** Mission cards left to draw (a random one is drawn each time) and the discard pile. */
 	missionDeck: string[];
 	missionDiscard: string[];

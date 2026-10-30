@@ -10,6 +10,7 @@ import {
 	repairCost,
 	SELL_PRICE,
 	sellableCubes,
+	shipsForSale,
 	tradeHere,
 	usableShields,
 	WEALTH_PRICE,
@@ -24,7 +25,7 @@ import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
 /** Active captain's controls: impulse, fire engines, then end turn (Status Phase: arm markers). */
 const props = defineProps<{ G: ZiaState; playerID: string; currentPlayer: string; nameOf: (seat: string) => string }>();
-const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; outfitters: [] }>();
+const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; outfitters: []; shipyard: [] }>();
 
 const myTurn = computed(() => props.playerID === props.currentPlayer);
 const ship = computed(() => props.G.players[props.playerID]?.ship ?? null);
@@ -75,6 +76,7 @@ const shieldChoices = computed(() =>
 const atPort = computed(() => atStarport(props.G, props.playerID));
 const docked = computed(() => !!props.G.turn.starport);
 const can = (move: string) => checkMove(props.G, props.playerID, props.currentPlayer, move, []) === true;
+const forSale = computed(() => shipsForSale(props.G, props.playerID));
 
 /** Trade at a planet's Buy / Sell space. */
 const trade = computed(() => tradeHere(props.G, props.playerID));
@@ -178,6 +180,9 @@ watch(
 		</button>
 		<button class="action" @click="emit('outfitters')">
 			<span>Outfitters</span><span class="text-slate-400">buy, sell, rearrange</span>
+		</button>
+		<button class="action" :disabled="!forSale.length" @click="emit('shipyard')">
+			<span>Buy a new ship</span><span class="text-violet-300">{{ forSale.length ? `Tier ${def.tier + 1}` : 'none for sale' }}</span>
 		</button>
 		<button class="action" :disabled="!can('buyFame')" :title="can('buyFame') ? '' : 'Needs 5,000 credits, and never the winning point'" @click="emit('act', 'buyFame')">
 			<span>Throw some credits around</span><span class="text-amber-300">{{ WEALTH_PRICE.toLocaleString('en-US') }} cR → 1 fame</span>

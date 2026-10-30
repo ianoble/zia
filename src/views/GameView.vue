@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
 import { gameDef, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
+import { shipsForSale } from '../logic/game';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { cargoTargets, damageTargets, missionLimit } from '../logic/ship';
@@ -122,12 +123,23 @@ watch(mapCollapsed, (v) => localStorage.setItem(MAP_COLLAPSED_KEY, v ? '1' : '0'
 const me = computed(() => G.value?.players?.[props.playerID]);
 const myMissionLimit = computed(() => (me.value?.ship ? missionLimit(me.value.ship) : 1));
 const missionsToKeep = computed(() => Math.max(1, myMissionLimit.value - (me.value?.activeMissions?.length ?? 0)));
-/** Starport outfitters (opened from the Starport Phase panel). */
+/** Starport outfitters and shipyard (opened from the Starport Phase panel). */
 const outfittersOpen = ref(false);
+const shipyardOpen = ref(false);
+const upgrading = computed(() => !!G.value?.players?.[props.playerID]?.upgrade);
 const docked = computed(() => stage.value === 'play' && isMyTurn.value && !!G.value?.turn?.starport);
 watch(docked, (d) => {
-	if (!d) outfittersOpen.value = false;
+	if (!d) {
+		outfittersOpen.value = false;
+		shipyardOpen.value = false;
+	}
 });
+watch(upgrading, (u) => {
+	if (u) shipyardOpen.value = false;
+});
+function pickNewShip(shipId: string, abilityIndex: number) {
+	act('startShipUpgrade', shipId, abilityIndex);
+}
 const showMissionHand = computed(() => stage.value === 'play' && !!me.value?.ship);
 const HAND_COLLAPSED_KEY = 'zia:missionHandCollapsed';
 const handCollapsed = ref(localStorage.getItem(HAND_COLLAPSED_KEY) === '1');
@@ -239,6 +251,36 @@ onUnmounted(() => disconnect());
 					/>
 
 					<OutfitShop
+						v-else-if="stage === 'play' && docked && upgrading"
+						mode="upgrade"
+						:G="G"
+						:player-i-d="playerID"
+						:current-player="currentPlayer"
+						:color="playerColor(playerID)"
+						:captain-name="nameOf(playerID)"
+						@act="act"
+					/>
+
+					<div v-else-if="stage === 'play' && docked && shipyardOpen" class="space-y-3">
+						<div class="flex items-center justify-between">
+							<h2 class="text-lg font-bold">Shipyard: buy a ship one tier up</h2>
+							<button type="button" class="rounded-lg border border-slate-700 px-3 py-1 text-sm hover:bg-slate-800" @click="shipyardOpen = false">Close</button>
+						</div>
+						<p class="text-sm text-slate-400">Pick the ship and its ability. Next you'll fit your outfits into its hold, then pay.</p>
+						<ShipPicker
+							:G="G"
+							:my-turn="isMyTurn"
+							:name-of="nameOf"
+							:color-of="colorOf"
+							:ships="shipsForSale(G, playerID)"
+							:credits="G.players[playerID].credits"
+							show-price
+							button-label="Fit out this ship"
+							@pick="pickNewShip"
+						/>
+					</div>
+
+					<OutfitShop
 						v-else-if="stage === 'play' && docked && outfittersOpen"
 						mode="starport"
 						:G="G"
@@ -322,6 +364,7 @@ onUnmounted(() => disconnect());
 						:name-of="nameOf"
 						@act="act"
 						@outfitters="outfittersOpen = true"
+						@shipyard="shipyardOpen = true"
 					/>
 
 					<div v-if="gameOver" class="rounded-lg border border-amber-800/50 bg-slate-900/90 p-4 text-center text-sm">

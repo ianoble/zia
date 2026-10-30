@@ -537,6 +537,18 @@ const outfitDamaged = (ship: ShipState, o: PlacedOutfit) => {
 	return placedCells(o).some((c) => damaged.has(cellKey(c.x, c.y)));
 };
 
+/** Price of a ship one tier up: Tier II 5,000, Tier III 8,000. */
+export const shipPrice = (shipId: string) => SHIPS_BY_ID[shipId]?.price ?? 0;
+
+/** Ships a captain could buy now: exactly one tier up, in play, not owned by anyone and not traded in. */
+export function shipsForSale(G: ZiaState, seat: string): string[] {
+	const ship = G.players[seat]?.ship;
+	if (!ship) return [];
+	const owned = new Set(Object.values(G.players).map((p) => p.ship?.shipId));
+	const retired = new Set(G.retiredShips ?? []);
+	return IN_SCOPE_SHIPS.filter((s) => s.tier === shipDef(ship).tier + 1 && !owned.has(s.id) && !retired.has(s.id)).map((s) => s.id);
+}
+
 /** Starport rule: outfits can't go on damaged spaces or on cargo (move the cubes first). */
 function clearOfDamageAndCargo(ship: ShipState, o: PlacedOutfit): true | string {
 	const damaged = damagedCells(ship);
@@ -647,7 +659,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			const def = SHIPS_BY_ID[shipId as string];
 			if (!def || !IN_SCOPE_SHIPS.includes(def)) return 'Unknown ship';
 			if (def.tier !== 1) return 'Pick a Tier I ship';
-			if (Object.values(G.players).some((o) => o.ship?.shipId === def.id)) return `${def.name} is already taken`;
+			if (Object.values(G.players).some((o) => o.ship?.shipId === def.id) || G.retiredShips?.includes(def.id)) return `${def.name} is already taken`;
 			if (!Number.isInteger(abilityIndex) || !def.abilities[abilityIndex as number]) return 'Choose one of the ship abilities';
 			return true;
 		}
@@ -657,6 +669,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 		case 'returnOutfit': {
 			if (G.stage !== 'outfit' && !(G.stage === 'play' && G.turn.starport)) return 'Outfits are bought at a starport (dock first)';
 			if (!p.ship) return 'Pick a ship first';
+			if (p.upgrade && moveName !== 'returnOutfit') return 'Finish or cancel the ship purchase first';
 			if (moveName === 'buyOutfit') {
 				const def = OUTFITS_BY_ID[args[0] as string];
 				if (!def) return 'Unknown outfit';
@@ -799,6 +812,44 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			return true;
 		}
 
+		case 'startShipUpgrade': {
+			if (!G.turn.starport || !p.ship) return 'Dock at a starport first';
+			if (p.upgrade) return 'Already buying a ship';
+			const [shipId, abilityIndex] = args as [string, number];
+			const def = SHIPS_BY_ID[shipId];
+			if (!def || !shipsForSale(G, playerID).includes(shipId)) return 'You can only buy a ship exactly one tier up that nobody has';
+			if (!Number.isInteger(abilityIndex) || !def.abilities[abilityIndex]) return 'Choose one of the ship abilities';
+			return p.credits >= def.price ? true : `${def.name} costs ${def.price.toLocaleString('en-US')} credits`;
+		}
+
+		case 'upgradePlaceOutfit': {
+			if (!p.upgrade || !p.ship) return 'Not buying a ship';
+			const uid = args[0] as string;
+			const o = p.ship.outfits.find((x) => x.uid === uid);
+			if (!o) return 'That outfit is not in your hold';
+			const pos = placementArgs(args.slice(1));
+			if (!pos) return 'Bad placement';
+			const others = p.upgrade.layout.filter((x) => x.uid !== uid);
+			return canPlaceOutfit(SHIPS_BY_ID[p.upgrade.shipId], others, { ...o, ...pos });
+		}
+
+		case 'upgradeUnplace':
+			if (!p.upgrade) return 'Not buying a ship';
+			return p.upgrade.layout.some((x) => x.uid === args[0]) ? true : 'That outfit is not placed';
+
+		case 'completeShipUpgrade': {
+			if (!p.upgrade || !p.ship) return 'Not buying a ship';
+			const placed = new Set(p.upgrade.layout.map((o) => o.uid));
+			if (p.ship.outfits.some((o) => !placed.has(o.uid))) return 'Place (or sell) every outfit first';
+			const def = SHIPS_BY_ID[p.upgrade.shipId];
+			const modsOk = p.upgrade.layout.filter((o) => OUTFITS_BY_ID[o.outfitId].overlays).every((m) => canPlaceOutfit(def, p.upgrade!.layout, m) === true);
+			if (!modsOk) return 'Each mod has to sit on the right outfit';
+			return p.credits >= def.price ? true : `${def.name} costs ${def.price.toLocaleString('en-US')} credits`;
+		}
+
+		case 'cancelShipUpgrade':
+			return p.upgrade ? true : 'Not buying a ship';
+
 		case 'enterStarport':
 			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
 			if (G.turn.starport) return 'Already docked';
@@ -831,6 +882,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 
 		case 'endTurn': {
 			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
+			if (p.upgrade) return 'Finish or cancel the ship purchase first';
 			const n = args[0] ?? 0;
 			if (!Number.isInteger(n) || (n as number) < 0) return 'Bad number of markers';
 			if ((n as number) > markersAvailableToArm(p.ship)) return 'Not that many markers to arm';
@@ -893,6 +945,7 @@ const moves = {
 		const i = p.ship!.outfits.findIndex((o) => o.uid === uid);
 		const [o] = p.ship!.outfits.splice(i, 1);
 		const def = OUTFITS_BY_ID[o.outfitId];
+		if (p.upgrade) p.upgrade.layout = p.upgrade.layout.filter((x) => x.uid !== uid);
 		const refund = G.stage === 'outfit' ? def.cost : outfitSellPrice(o.outfitId);
 		p.credits += refund;
 		if (G.supply[o.outfitId] != null) G.supply[o.outfitId]++;
@@ -1106,6 +1159,66 @@ const moves = {
 			}
 		}
 		endMovement(G, playerID);
+	}),
+
+	/** Starport: start buying a ship one tier up (then fit the outfits into its hold). */
+	startShipUpgrade: guarded('startShipUpgrade', ({ G, playerID }, shipId: string, abilityIndex: number) => {
+		G.players[playerID].upgrade = { shipId, abilityIndex, layout: [] };
+		log(G, playerID, `is fitting out a ${SHIPS_BY_ID[shipId].name}`);
+	}),
+
+	/** Ship purchase: place (or move) an outfit in the new hold. */
+	upgradePlaceOutfit: guarded('upgradePlaceOutfit', ({ G, playerID }, uid: string, x: number, y: number, rotation: Rotation, flipped: boolean) => {
+		const p = G.players[playerID];
+		const o = p.ship!.outfits.find((v) => v.uid === uid)!;
+		p.upgrade!.layout = [...p.upgrade!.layout.filter((v) => v.uid !== uid), { ...o, x, y, rotation, flipped }];
+	}),
+
+	/** Ship purchase: take an outfit back out of the new hold. */
+	upgradeUnplace: guarded('upgradeUnplace', ({ G, playerID }, uid: string) => {
+		const u = G.players[playerID].upgrade!;
+		u.layout = u.layout.filter((v) => v.uid !== uid);
+	}),
+
+	/** Ship purchase: give up on it (nothing is paid). */
+	cancelShipUpgrade: guarded('cancelShipUpgrade', ({ G, playerID }) => {
+		G.players[playerID].upgrade = null;
+		log(G, playerID, 'decided not to buy a new ship');
+	}),
+
+	/**
+	 * Buy New Ship (rulebook p18): pay, gain 1 fame, and move to the new ship with every
+	 * outfit as placed. Damage and bounty are left behind, ability cards are kept, and the
+	 * cubes are placed again in the new hold. The old ship leaves the game.
+	 */
+	completeShipUpgrade: guarded('completeShipUpgrade', ({ G, playerID }) => {
+		const p = G.players[playerID];
+		const old = p.ship!;
+		const up = p.upgrade!;
+		const def = SHIPS_BY_ID[up.shipId];
+		p.credits -= def.price;
+		p.fame++;
+		p.bounty = 0;
+		p.ship = {
+			shipId: up.shipId,
+			abilityIndex: up.abilityIndex,
+			abilityExhausted: old.abilityExhausted,
+			keptAbilities: [...(old.keptAbilities ?? []), { shipId: old.shipId, abilityIndex: old.abilityIndex }],
+			energy: Math.min(old.energy, def.energy),
+			armedMarkers: old.armedMarkers,
+			disarmedMarkers: old.disarmedMarkers,
+			impulseReady: old.impulseReady,
+			outfits: up.layout,
+			damage: [],
+			iceDamage: [],
+			cargo: [],
+		};
+		p.upgrade = null;
+		(G.retiredShips ??= []).push(old.shipId);
+		log(G, playerID, `bought the ${def.name} for ${def.price.toLocaleString('en-US')} credits: +1 fame`);
+		let lost = 0;
+		for (const c of old.cargo) if (!gainCargo(G, playerID, c.color)) lost++;
+		if (lost) log(G, playerID, `had no room for ${lost} cube${lost === 1 ? '' : 's'}, which were jettisoned`);
 	}),
 
 	/** Dock: end the Action Phase at a starport and start the Starport Phase. */

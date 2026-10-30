@@ -4,16 +4,25 @@ import { IN_SCOPE_SHIPS } from '../../data/ships';
 import { parseShape } from '../../logic/holdGeometry';
 import type { ZiaState } from '../../logic/types';
 
-/** Setup step: pick a Tier I ship and one of its two abilities. */
+/**
+ * Pick a ship and one of its abilities: a Tier I ship at setup, or (with `ships`) a ship
+ * to buy at a starport.
+ */
 const props = defineProps<{
 	G: ZiaState;
 	myTurn: boolean;
 	nameOf: (seat: string) => string;
 	colorOf: (seat: string) => string;
+	/** Ship ids to offer (default: every Tier I ship). */
+	ships?: string[];
+	/** Price shown on each ship (buying at a starport). */
+	showPrice?: boolean;
+	buttonLabel?: string;
+	credits?: number;
 }>();
 const emit = defineEmits<{ pick: [shipId: string, abilityIndex: number] }>();
 
-const tierOne = IN_SCOPE_SHIPS.filter((s) => s.tier === 1);
+const tierOne = computed(() => (props.ships ? IN_SCOPE_SHIPS.filter((s) => props.ships!.includes(s.id)) : IN_SCOPE_SHIPS.filter((s) => s.tier === 1)));
 const abilityChoice = ref<Record<string, number>>({});
 
 const takenBy = computed(() => {
@@ -39,7 +48,9 @@ function holdCells(rows: string[]) {
 				<div>
 					<h3 class="text-lg font-black uppercase tracking-wide">{{ s.name }}</h3>
 					<p class="text-xs text-slate-400">
-						Hold {{ s.holdSize }} · Impulse {{ s.impulse }} · Energy {{ s.energy }}
+						Hold {{ s.holdSize }} · Impulse {{ s.impulse }} · Energy {{ s.energy }}<template v-if="showPrice">
+							· <span class="text-amber-300">{{ s.price.toLocaleString('en-US') }} cR</span></template
+						>
 						<span v-if="s.set === 'embers'" class="ml-1 rounded bg-orange-900/60 px-1 text-orange-200">Embers</span>
 					</p>
 				</div>
@@ -71,10 +82,10 @@ function holdCells(rows: string[]) {
 					v-else
 					type="button"
 					class="w-full rounded-lg bg-sky-600 py-2 font-semibold transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
-					:disabled="!myTurn"
+					:disabled="!myTurn || (credits != null && credits < s.price)"
 					@click="emit('pick', s.id, abilityChoice[s.id] ?? 0)"
 				>
-					{{ myTurn ? 'Launch this ship' : 'Wait for your pick' }}
+					{{ !myTurn ? 'Wait for your pick' : credits != null && credits < s.price ? 'Not enough credits' : (buttonLabel ?? 'Launch this ship') }}
 				</button>
 			</div>
 		</article>

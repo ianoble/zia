@@ -4,7 +4,7 @@ import type { Ctx } from 'boardgame.io';
 import { gameDef } from './index';
 import type { ZiaState } from './types';
 import { boardHexes, startingBoard } from './board';
-import { outfitSellPrice } from './game';
+import { outfitSellPrice, shipsForSale } from './game';
 import { autoPlace, cellKey, placedCells } from './holdGeometry';
 import { cargoTargets } from './ship';
 import { SHIPS_BY_ID } from '../data/ships';
@@ -162,5 +162,66 @@ describe('starport services', () => {
 		expect(c.act('endTurn', 1)).toBe(true);
 		expect(c.G().players[seat].ship!.armedMarkers).toBe(4);
 		expect(c.G().players[seat].ship!.energy).toBe(0);
+	});
+});
+
+describe('buying a new ship', () => {
+	function docked() {
+		const c = portGame();
+		c.act('teleport', c.planet);
+		c.act('enterStarport');
+		return c;
+	}
+
+	it('only exactly one tier up, and you need the credits', () => {
+		const c = docked();
+		const seat = Object.values(c.G().players).find((p) => p.ship?.shipId === 'easy-tiger')!.id;
+		const forSale = shipsForSale(c.G(), seat);
+		expect(forSale.length).toBeGreaterThan(0);
+		expect(forSale.every((id) => SHIPS_BY_ID[id].tier === 2)).toBe(true);
+		expect(c.act('startShipUpgrade', 'long-haul', 0)).toBe(false); // tier III
+		c.act('give', 4000, 0);
+		expect(c.act('startShipUpgrade', 'bitter-karma', 0)).toBe(false); // 5,000
+		c.act('give', 9000, 0);
+		expect(c.act('startShipUpgrade', 'bitter-karma', 0)).toBe(true);
+		expect(c.act('endTurn', 0)).toBe(false); // finish or cancel first
+		expect(c.act('cancelShipUpgrade')).toBe(true);
+		expect(c.me().upgrade).toBeNull();
+		expect(c.me().credits).toBe(9000);
+	});
+
+	it('fit every outfit into the new hold, then pay: +1 fame, damage and bounty left behind, cubes placed again', () => {
+		const c = docked();
+		const engine = c.me().ship!.outfits[0];
+		c.act('give', 9000, 2, '0,0');
+		c.act('hurt', ['1,0'], ['2,0'], 5);
+		c.act('startShipUpgrade', 'bitter-karma', 1);
+		expect(c.act('completeShipUpgrade')).toBe(false); // the engine isn't placed yet
+		const spot = autoPlace(SHIPS_BY_ID['bitter-karma'], [], engine.outfitId, engine.uid)!;
+		expect(c.act('upgradePlaceOutfit', engine.uid, spot.x, spot.y, spot.rotation, spot.flipped)).toBe(true);
+		expect(c.act('completeShipUpgrade')).toBe(true);
+		const me = c.me();
+		expect(me.ship!.shipId).toBe('bitter-karma');
+		expect(me.ship!.abilityIndex).toBe(1);
+		expect(me.ship!.keptAbilities).toEqual([{ shipId: 'easy-tiger', abilityIndex: 0 }]);
+		expect(me.ship!.outfits.map((o) => o.uid)).toEqual([engine.uid]);
+		expect(me.ship!.damage).toEqual([]);
+		expect(me.ship!.iceDamage).toEqual([]);
+		expect(me.credits).toBe(4000);
+		expect(me.fame).toBe(3);
+		expect(me.bounty).toBe(0);
+		expect(me.pendingCargo).toEqual(['spice']);
+		expect(c.G().retiredShips).toContain('easy-tiger');
+	});
+
+	it("an outfit that won't fit can be sold instead", () => {
+		const c = docked();
+		const engine = c.me().ship!.outfits[0];
+		c.act('give', 9000, 0);
+		c.act('startShipUpgrade', 'bitter-karma', 0);
+		expect(c.act('returnOutfit', engine.uid)).toBe(true);
+		expect(c.me().credits).toBe(10000);
+		expect(c.act('completeShipUpgrade')).toBe(true);
+		expect(c.me().ship!.outfits).toEqual([]);
 	});
 });
