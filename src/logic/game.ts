@@ -17,7 +17,9 @@ import {
 	boardHexes,
 	dealStartingTiles,
 	explorePlacement,
+	gateDestinations,
 	movePath,
+	onTigrisGate,
 	stepCrossing,
 	type BorderKind,
 	reachableHexes,
@@ -850,6 +852,17 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 		case 'cancelShipUpgrade':
 			return p.upgrade ? true : 'Not buying a ship';
 
+		case 'useGate': {
+			if (G.stage !== 'play' || !p.ship || !p.position) return 'Not during setup';
+			if (G.turn.movement < 1) return 'Using a gate takes 1 movement';
+			if (onTigrisGate(G.board, p.position)) return true;
+			const target = args[0] as string;
+			if (!gateDestinations(G.board, p.position).includes(target)) {
+				return gateDestinations(G.board, p.position).length ? 'Pick a space on another gate' : 'Fly into a gate first (and find another gate)';
+			}
+			return occupiedHexes(G, playerID).has(target) ? 'Another ship is there' : true;
+		}
+
 		case 'enterStarport':
 			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
 			if (G.turn.starport) return 'Already docked';
@@ -897,7 +910,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
 
 /** Action Phase moves, not allowed once docked at a starport. */
-const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'crossBorder', 'stopMove']);
+const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'crossBorder', 'stopMove', 'useGate']);
 
 /** Moves for a move paused at a border. */
 const CROSSING_MOVES = new Set(['crossBorder', 'stopMove', 'useShield', 'acceptBorderEffect']);
@@ -1219,6 +1232,41 @@ const moves = {
 		let lost = 0;
 		for (const c of old.cargo) if (!gainCargo(G, playerID, c.color)) lost++;
 		if (lost) log(G, playerID, `had no room for ${lost} cube${lost === 1 ? '' : 's'}, which were jettisoned`);
+	}),
+
+	/**
+	 * Use Gate (minor action, 1 movement, rulebook p10): jump from a gate to any space on
+	 * another gate. The Tigris gate instead sends the ship to the unoccupied spawn point
+	 * closest to a d20 roll. The first captain to use a gate earns 1 fame, and the first to
+	 * use the Tigris gate earns 1 fame. Movement carries on afterwards.
+	 */
+	useGate: guarded('useGate', ({ G, playerID, random }, target?: string) => {
+		const p = G.players[playerID];
+		G.turn.movement -= 1;
+		const fame = (G.gateFameTaken ??= {});
+		if (onTigrisGate(G.board, p.position!)) {
+			const roll = rollDie(G, playerID, random, 20);
+			const dest = respawnHex(G.board, roll, occupiedHexes(G, playerID));
+			if (!dest) {
+				log(G, playerID, `used the Tigris gate and rolled ${roll}, but every spawn point is taken`);
+				return;
+			}
+			p.position = dest;
+			log(G, playerID, `used the Tigris gate: rolled ${roll}, came out at spawn point ${boardHexes(G.board).get(dest)?.spawnNumber}`);
+			if (!fame.tigris) {
+				fame.tigris = true;
+				p.fame++;
+				log(G, playerID, 'is the first to use the Tigris gate: +1 fame');
+			}
+			return;
+		}
+		p.position = target!;
+		log(G, playerID, `went through the gate to ${SECTORS_BY_ID[G.board.sectors[boardHexes(G.board).get(target!)!.sectorIndex].tileId]?.name}`);
+		if (!fame.gates) {
+			fame.gates = true;
+			p.fame++;
+			log(G, playerID, 'is the first to use the gates: +1 fame');
+		}
 	}),
 
 	/** Dock: end the Action Phase at a starport and start the Starport Phase. */

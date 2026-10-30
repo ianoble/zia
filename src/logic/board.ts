@@ -164,6 +164,28 @@ export function startingBoard(seats: string[], tileIds: string[] = STARTING_CAND
 	};
 }
 
+/** The Tigris gate is damaged: it sends ships to a random spawn point and can't be a destination. */
+export const TIGRIS_GATE = 'tigris-gate';
+
+/**
+ * Gate spaces a ship on `from` can travel to with Use Gate (rulebook p10): any space on
+ * another gate (not the Tigris gate). Empty if `from` isn't a gate space.
+ */
+export function gateDestinations(board: BoardState, from: string): string[] {
+	const hexes = boardHexes(board);
+	const here = hexes.get(from);
+	if (!here?.kinds.includes('gate')) return [];
+	return [...hexes.values()]
+		.filter((h) => h.kinds.includes('gate') && h.sectorIndex !== here.sectorIndex && board.sectors[h.sectorIndex].tileId !== TIGRIS_GATE)
+		.map((h) => h.key);
+}
+
+/** Whether `hex` is a space of the Tigris gate. */
+export function onTigrisGate(board: BoardState, hex: string): boolean {
+	const h = boardHexes(board).get(hex);
+	return !!h?.kinds.includes('gate') && board.sectors[h.sectorIndex].tileId === TIGRIS_GATE;
+}
+
 /** Planetary entrances on the board: board hex and HEX_DIRECTIONS side, keyed "q,r:dir". */
 export function planetEntrances(board: BoardState): Set<string> {
 	const out = new Set<string>();

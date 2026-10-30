@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
-import { gameDef, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
+import { gameDef, gateDestinations, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
 import { shipsForSale } from '../logic/game';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
@@ -105,7 +105,21 @@ const jumpTargets = computed(() => {
 	return unexploredEdges(g.board, me.position).map((e) => e.target);
 });
 
+/** Use Gate: other gates' spaces I can jump to (1 movement) from the gate I'm on. */
+const gateTargets = computed(() => {
+	const g = G.value;
+	const me = g?.players?.[props.playerID];
+	if (!g || stage.value !== 'play' || !isMyTurn.value || !me?.position || g.turn.movement < 1 || g.turn.crossing || g.turn.starport) return null;
+	const occupied = new Set(Object.values(g.players).filter((p) => p.id !== props.playerID && p.position).map((p) => p.position!));
+	return gateDestinations(g.board, me.position).filter((k) => !occupied.has(k));
+});
+
 function onHexClick(key: string) {
+	// A gate jump costs 1 movement: use it unless flying there is just as cheap.
+	if (gateTargets.value?.includes(key) && (reachable.value?.get(key) ?? Infinity) > 1) {
+		move('useGate', key);
+		return;
+	}
 	if (reachable.value?.has(key)) move('moveShip', key);
 	else if (jumpTargets.value?.includes(key)) move('blindJump', key);
 }
@@ -230,6 +244,7 @@ onUnmounted(() => disconnect());
 							<BoardMap :board="G.board" :ships="boardShips" :reachable="reachable"
 								:jump-targets="jumpTargets"
 								:border-warnings="borderWarnings"
+								:gate-targets="gateTargets"
 								:exploration-spaces="G.explorationSpaces"
 								@hex-click="onHexClick"
 							/>

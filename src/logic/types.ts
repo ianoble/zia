@@ -187,6 +187,8 @@ export interface ZiaState extends BaseGameState {
 	 * In Demand credits (0 or 1,000) waiting on empty sections.
 	 */
 	economy: Record<EconomyCube, { cubes: number; demand: number }>;
+	/** Fame for the first captain to use a gate, and for the first to use the Tigris gate, once each. */
+	gateFameTaken?: { gates?: boolean; tigris?: boolean };
 	/** Ships traded in for a better one: removed from the game (rulebook p18). */
 	retiredShips?: string[];
 	/** Mission cards left to draw (a random one is drawn each time) and the discard pile. */

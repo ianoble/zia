@@ -17,7 +17,7 @@ import {
 } from '../../logic/game';
 import { ECONOMY_CUBES, type EconomyCube } from '../../logic/types';
 import { CUBE_FILL } from '../ship/shipMatTheme';
-import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
+import { boardHexes, edgeSymbolFacing, gateDestinations, onTigrisGate, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import { explorationTokenLabel } from '../../data/exploration';
 import { engineRollResult, shipDef } from '../../logic/ship';
@@ -76,6 +76,19 @@ const shieldChoices = computed(() =>
 const atPort = computed(() => atStarport(props.G, props.playerID));
 const docked = computed(() => !!props.G.turn.starport);
 const can = (move: string) => checkMove(props.G, props.playerID, props.currentPlayer, move, []) === true;
+/** Use Gate from the gate the ship is on. */
+const onGate = computed(() => {
+	const pos = props.G.players[props.playerID]?.position;
+	return !!pos && !!boardHexes(props.G.board).get(pos)?.kinds.includes('gate');
+});
+const onTigris = computed(() => {
+	const pos = props.G.players[props.playerID]?.position;
+	return !!pos && onTigrisGate(props.G.board, pos);
+});
+const otherGates = computed(() => {
+	const pos = props.G.players[props.playerID]?.position;
+	return pos ? gateDestinations(props.G.board, pos).length > 0 : false;
+});
 const forSale = computed(() => shipsForSale(props.G, props.playerID));
 
 /** Trade at a planet's Buy / Sell space. */
@@ -269,6 +282,20 @@ watch(
 			<p v-if="!(scanSides.length && deckLeft)" class="text-xs text-slate-500">
 				{{ deckLeft ? 'Move next to an unexplored edge (the outer rim of the map) to Scan or Blind Jump.' : 'Every sector has been explored.' }}
 			</p>
+		</div>
+
+		<div v-if="onGate" class="space-y-2 rounded-lg border border-lime-900/60 bg-lime-950/20 p-2">
+			<span class="font-semibold text-slate-300">Gate</span>
+			<template v-if="onTigris">
+				<button class="action" :disabled="movement < 1" @click="emit('act', 'useGate')">
+					<span>Use the Tigris gate</span><span class="text-lime-300">1 movement</span>
+				</button>
+				<p class="text-xs text-slate-500">Damaged gate: roll a d20 and come out at the free spawn point closest to the roll.</p>
+			</template>
+			<p v-else-if="otherGates" class="text-xs text-slate-400">
+				Use Gate (minor, 1 movement): click a dashed GATE space on another gate to jump there. Your remaining movement carries on.
+			</p>
+			<p v-else class="text-xs text-slate-500">No other gate has been found yet (the Tigris gate can't be a destination).</p>
 		</div>
 
 		<div v-if="atPort" class="space-y-2 rounded-lg border border-teal-900/60 bg-teal-950/20 p-2">

@@ -28,6 +28,8 @@ const props = defineProps<{
 	explorationSpaces?: string[] | null;
 	/** Reachable hexes whose route crosses a border (marked ⚠). */
 	borderWarnings?: Set<string> | null;
+	/** Gate spaces the active ship can jump to with Use Gate. */
+	gateTargets?: string[] | null;
 }>();
 const emit = defineEmits<{ hexClick: [key: string] }>();
 
@@ -218,7 +220,12 @@ const hexTitles = computed(() => {
 		if (k.includes('asteroid')) lines.push('Asteroid: entering, d20 1–10 damage equal to the roll (shields can cut it), 11–20 safe.');
 		if (k.includes('debris')) lines.push('Debris field: entering, d20 1–3 the ship is destroyed, 4–20 safe.');
 		if (k.includes('nebula')) lines.push('Nebula: crossing in from outside, d20 1–10 lose that much energy (shields can cut it), 11–20 safe. Moving around inside is free.');
-		if (k.includes('gate')) lines.push('Gate (gate travel coming later).');
+		if (k.includes('gate'))
+			lines.push(
+				props.board.sectors[h.sectorIndex]?.tileId === 'tigris-gate'
+					? 'Tigris gate (damaged): Use Gate (1 movement) to come out at the spawn point closest to a d20 roll. It can\'t be a destination.'
+					: 'Gate: Use Gate (1 movement) to jump to any space on another gate.',
+			);
 		if (k.includes('buy')) lines.push(`${tradeText(tileId, 'Buy')} (trading coming later).`);
 		if (k.includes('sell')) lines.push(`${tradeText(tileId, 'Sell')} (trading coming later).`);
 		if (k.includes('harvest')) lines.push('Harvest space (coming later).');
@@ -235,6 +242,14 @@ const hexTitles = computed(() => {
 /** Face-down exploration tokens, drawn on their hex. */
 const tokenViews = computed(() =>
 	(props.explorationSpaces ?? []).map((key) => ({ key, ...hexToPixel(parseHexKey(key), SIZE) })),
+);
+
+/** Use Gate destinations, outlined and clickable. */
+const gateViews = computed(() =>
+	(props.gateTargets ?? []).map((key) => {
+		const { x, y } = hexToPixel(parseHexKey(key), SIZE);
+		return { key, x, y, points: hexCorners(x, y, SIZE * 0.8).map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ') };
+	}),
 );
 
 const shipViews = computed(() =>
@@ -397,6 +412,13 @@ function onHexClick(key: string) {
 				<EdgeSymbolGlyph :symbol="m.symbol" />
 			</g>
 			<text v-for="s in sectorLabels" :key="`s${s.i}`" :x="s.x" :y="s.y" text-anchor="middle" class="sector-label">{{ s.name }}</text>
+
+			<!-- Use Gate destinations -->
+			<g v-for="g in gateViews" :key="`gate${g.key}`" class="hex gate-target" @click="onHexClick(g.key)">
+				<title>Use Gate (1 movement): jump here</title>
+				<polygon :points="g.points" />
+				<text :x="g.x" :y="g.y + 10" text-anchor="middle">GATE</text>
+			</g>
 
 			<!-- Face-down exploration tokens -->
 			<g v-for="t in tokenViews" :key="`tok${t.key}`" :transform="`translate(${t.x} ${t.y})`" class="exploration-token">
@@ -593,6 +615,25 @@ function onHexClick(key: string) {
 	pointer-events: none;
 }
 .exploration-token {
+	pointer-events: none;
+}
+.gate-target polygon {
+	fill: #65a30d33;
+	stroke: #a3e635;
+	stroke-width: 5;
+	stroke-dasharray: 12 8;
+	cursor: pointer;
+}
+.gate-target:hover polygon {
+	fill: #65a30d88;
+}
+.gate-target text {
+	font-size: 26px;
+	font-weight: 900;
+	fill: #ecfccb;
+	stroke: #05060f;
+	stroke-width: 5;
+	paint-order: stroke;
 	pointer-events: none;
 }
 .exploration-token circle {
