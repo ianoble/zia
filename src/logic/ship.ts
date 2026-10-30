@@ -122,6 +122,13 @@ export function engineRollResult(state: ShipState, uid: string, roll: number, di
 	return { result, penalty, gts };
 }
 
+/** Active Mission Limit (rulebook p12, p28): 1, +2 for each undamaged M-Comp mod. */
+export function missionLimit(state: ShipState): number {
+	const damaged = new Set([...state.damage, ...state.iceDamage]);
+	const mcomps = state.outfits.filter((o) => o.outfitId === 'm-comp' && !placedCells(o).some((c) => damaged.has(cellKey(c.x, c.y))));
+	return 1 + 2 * mcomps.length;
+}
+
 /** Stranded: no energy and no armed markers (rulebook p4). */
 export function isStranded(state: ShipState): boolean {
 	return state.energy <= 0 && state.armedMarkers <= 0;

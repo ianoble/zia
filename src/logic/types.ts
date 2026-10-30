@@ -112,6 +112,11 @@ export interface TurnState {
 	movement: number;
 	/** Two face-up exploration tokens: the captain must choose 1 fame or 2,000 credits before anything else. */
 	explorationPairPending?: boolean;
+	/**
+	 * Mission points the captain stopped on this turn (once per point): each lets them
+	 * draw 3 mission cards at the end of the turn (rulebook p12).
+	 */
+	missionDraws?: string[];
 	/** Luck (a natural 20 on a d20) has paid out this turn; it pays at most once per turn. */
 	luckUsed?: boolean;
 	/** A move stopped at a border, waiting for the captain (see BorderCrossing). */

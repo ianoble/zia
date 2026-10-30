@@ -37,6 +37,8 @@ const scanSides = computed(() => {
 		.filter((e) => !seen.has(e.slot) && seen.add(e.slot))
 		.map((e) => ({ slot: e.slot, name: SLOT_NAMES[e.slot], symbol: edgeSymbolFacing(props.G.board.sectors[e.sectorIndex].rotation, e.slot) }));
 });
+/** Mission cards queued for the end of the turn (3 per mission point stopped on). */
+const missionCards = computed(() => (props.G.turn.missionDraws?.length ?? 0) * 3);
 const myTokens = computed(() => props.G.players[props.playerID]?.explorationTokens ?? []);
 const pendingDamage = computed(() => props.G.players[props.playerID]?.pendingDamage ?? []);
 /** A move paused at a border. */
@@ -131,6 +133,9 @@ watch(
 		</div>
 		<p class="text-xs text-slate-400">
 			{{ movement > 0 ? 'Click a highlighted space on the map to move (1 per space).' : 'Get movement by flipping impulse or firing an engine.' }}
+		</p>
+		<p v-if="missionCards" class="rounded-md border border-orange-800/60 bg-orange-950/40 px-2 py-1.5 text-xs text-orange-200">
+			You'll draw {{ missionCards }} mission cards at the end of your turn ({{ missionCards / 3 }} mission point{{ missionCards > 3 ? 's' : '' }}).
 		</p>
 
 		<div class="space-y-2">

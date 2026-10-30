@@ -28,7 +28,7 @@ import {
 	unexploredEdges,
 } from './board';
 import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
-import { applyDamage, cargoTargets, createShipState, damagedCells, damageTargets, engineRollResult, maxDamage, shipDef, totalDamage } from './ship';
+import { applyDamage, cargoTargets, createShipState, damagedCells, damageTargets, engineRollResult, maxDamage, missionLimit, shipDef, totalDamage } from './ship';
 import {
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
@@ -324,6 +324,29 @@ function flyPath(c: MoveCtx, path: string[], forced = false) {
 		if (!enterSpace(c, to, step.entranceBounty)) return;
 		rest = rest.slice(1);
 	}
+	stoppedAt(c);
+}
+
+/** Cards drawn per mission point (rulebook p12). */
+export const MISSION_DRAW = 3;
+
+/**
+ * The ship's move ended where it is. On a mission point (once per point per turn, with a
+ * free mission slot) the captain gets to draw 3 mission cards at the end of the turn.
+ * It doesn't use up any movement: the captain can keep moving.
+ * TODO: count active missions once mission cards exist (none can be held yet).
+ */
+function stoppedAt(c: MoveCtx) {
+	const { G, playerID } = c;
+	const p = G.players[playerID];
+	if (!p.position || !p.ship) return;
+	if (!boardHexes(G.board).get(p.position)?.kinds.includes('mission')) return;
+	G.turn.missionDraws ??= [];
+	if (G.turn.missionDraws.includes(p.position)) return;
+	const activeMissions = 0;
+	if (activeMissions >= missionLimit(p.ship)) return;
+	G.turn.missionDraws.push(p.position);
+	log(G, playerID, `stopped on a mission point: will draw ${MISSION_DRAW} mission cards at the end of the turn`);
 }
 
 /** Move into the next space (1 movement): entrance bounty, then any exploration token. False if the move must stop. */
@@ -357,6 +380,7 @@ function resolveBorders(c: MoveCtx) {
 				G.turn.crossing = null;
 				G.turn.movement = Math.max(0, G.turn.movement - 1);
 				if (takeDamage(G, playerID, 'damage', roll, 'the planetary shield tore it apart')) events.endTurn();
+				else stoppedAt(c);
 				return;
 			}
 			if (roll <= 17) {
@@ -398,6 +422,7 @@ function finishCrossing(c: MoveCtx, stopAfter = false) {
 	if (!enterSpace(c, cross.to, cross.entranceBounty)) return;
 	if (stopAfter) {
 		G.turn.movement = 0;
+		stoppedAt(c);
 		return;
 	}
 	flyPath(c, cross.rest);
@@ -470,6 +495,7 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 	p.pendingCargo = [];
 	if (p.ship) p.ship.cargo = [];
 	G.turn.movement = 0;
+	G.turn.missionDraws = [];
 	log(G, seat, `was destroyed: ${reason}`);
 }
 
@@ -750,9 +776,10 @@ const moves = {
 	crossBorder: guarded('crossBorder', (c) => resolveBorders(c)),
 
 	/** At a border: stop short instead (keeping the rest of the movement). */
-	stopMove: guarded('stopMove', ({ G, playerID }) => {
-		G.turn.crossing = null;
-		log(G, playerID, 'stopped short of the border');
+	stopMove: guarded('stopMove', (c) => {
+		c.G.turn.crossing = null;
+		log(c.G, c.playerID, 'stopped short of the border');
+		stoppedAt(c);
 	}),
 
 	/** After a bad asteroid / nebula roll: fire a shield to cut it down (Shields Up, a minor action). */
@@ -862,6 +889,8 @@ const moves = {
 			ship.energy -= armCount;
 			log(G, playerID, `armed ${armCount} marker${armCount === 1 ? '' : 's'} (−${armCount} energy)`);
 		}
+		const draws = G.turn.missionDraws?.length ?? 0;
+		if (draws) log(G, playerID, `drew ${draws * MISSION_DRAW} mission cards (choosing a mission comes later)`);
 		log(G, playerID, 'ended their turn');
 		events.endTurn();
 	}),
@@ -897,7 +926,7 @@ const ZiaGame: Game<ZiaState> = {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
 				onBegin: ({ G, ctx, random }) => {
-					G.turn = { movement: 0, explorationPairPending: false, crossing: null };
+					G.turn = { movement: 0, explorationPairPending: false, crossing: null, missionDraws: [] };
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},
