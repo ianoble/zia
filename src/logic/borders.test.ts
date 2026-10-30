@@ -3,7 +3,7 @@ import { Client } from 'boardgame.io/client';
 import type { Ctx } from 'boardgame.io';
 import { gameDef } from './index';
 import type { ZiaState } from './types';
-import { boardHexes, movePath, startingBoard, startingSpawnFor, stepCrossing, type BoardState } from './board';
+import { boardHexes, entrancePath, leavesThroughShield, movePath, planetEntranceOf, startingBoard, startingSpawnFor, stepCrossing, type BoardState } from './board';
 import { hexKey, hexNeighbors, parseHexKey } from './hex';
 import { autoPlace } from './holdGeometry';
 import { SHIPS_BY_ID } from '../data/ships';
@@ -58,6 +58,33 @@ describe('routes avoid borders when they can', () => {
 	it('takes the equally short way round an asteroid', () => {
 		// (-1,0) to (1,-1) on TK-421: via (0,0) (open) or via (0,-1) (asteroid).
 		expect(movePath(tile('tk-421'), '-1,0', '1,-1', 5)).toEqual(['0,0', '1,-1']);
+	});
+});
+
+describe('leaving a planet by its entrance', () => {
+	// Neo Damascus: planet (-1,0), (0,0), (0,-1); entrance on (-1,0) facing (-2,0).
+	const b = tile('neo-damascus');
+	it('finds the entrance from any planet space', () => {
+		expect(planetEntranceOf(b, '0,-1')).toEqual({ inside: '-1,0', outside: '-2,0' });
+		expect(planetEntranceOf(b, '-2,0')).toBeNull();
+	});
+
+	it('knows when the usual route crosses the shield', () => {
+		expect(leavesThroughShield(b, '0,-1', '0,-2', 5, new Set(), false)).toBe(true);
+		expect(leavesThroughShield(b, '-1,0', '-2,0', 5, new Set(), false)).toBe(false);
+		expect(leavesThroughShield(b, '-2,0', '-3,0', 5, new Set(), false)).toBe(false); // not on a planet
+	});
+
+	it('routes out through the entrance, with no shield crossed', () => {
+		const path = entrancePath(b, '0,-1', '0,-2', 5)!;
+		expect(path.slice(0, 2)).toEqual(['-1,0', '-2,0']);
+		expect(path.at(-1)).toBe('0,-2');
+		let at = '0,-1';
+		for (const h of path) {
+			expect(stepCrossing(b, at, h, false).borders).not.toContain('shield');
+			at = h;
+		}
+		expect(entrancePath(b, '0,-1', '0,-2', path.length - 1)).toBeNull(); // out of reach that way
 	});
 });
 

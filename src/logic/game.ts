@@ -16,9 +16,12 @@ import {
 import {
 	boardHexes,
 	dealStartingTiles,
+	entrancePath,
 	explorePlacement,
 	gateDestinations,
+	leavesThroughShield,
 	movePath,
+	planetEntranceOf,
 	onTigrisGate,
 	stepCrossing,
 	type BorderKind,
@@ -336,6 +339,44 @@ function flyPath(c: MoveCtx, path: string[], forced = false) {
 		if (!enterSpace(c, to, step.entranceBounty)) return;
 		rest = rest.slice(1);
 	}
+}
+
+/** What the captain is asked when a move from a planet would cross its shield (see planetExitChoice). */
+export interface PlanetExitChoice {
+	/** The route through the entrance to the target, if it's in reach. */
+	viaEntrance: string[] | null;
+	/** Movement the entrance route to the target needs. */
+	entranceCost: number;
+	/** The space just outside the entrance, and whether the ship can stop there instead. */
+	outside: string;
+	canStopOutside: boolean;
+	/** Movement to fly out through the entrance and stop just outside. */
+	outsideCost: number;
+}
+
+/**
+ * A move from a planet whose usual route crosses the planetary shield: the captain may
+ * prefer to leave by the entrance. Null when there's nothing to ask (not on a planet, the
+ * route already uses the entrance, or the planet has no usable entrance).
+ */
+export function planetExitChoice(G: ZiaState, playerID: string, target: string): PlanetExitChoice | null {
+	const p = G.players[playerID];
+	if (!p?.position) return null;
+	const tokens = new Set(G.explorationSpaces ?? []);
+	const outlaw = p.bounty > 0;
+	if (!leavesThroughShield(G.board, p.position, target, G.turn.movement, tokens, outlaw)) return null;
+	const e = planetEntranceOf(G.board, p.position);
+	if (!e) return null;
+	const viaEntrance = entrancePath(G.board, p.position, target, G.turn.movement, tokens, outlaw);
+	const anyRoute = viaEntrance ?? entrancePath(G.board, p.position, target, 99, tokens, outlaw);
+	const toOutside = entrancePath(G.board, p.position, e.outside, G.turn.movement, tokens, outlaw);
+	return {
+		viaEntrance,
+		entranceCost: anyRoute?.length ?? Infinity,
+		outside: e.outside,
+		canStopOutside: !!toOutside && !occupiedHexes(G, playerID).has(e.outside),
+		outsideCost: toOutside?.length ?? Infinity,
+	};
 }
 
 /** Cards drawn per mission point (rulebook p12). */
@@ -727,6 +768,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			if (!reachableHexes(G.board, p.position, G.turn.movement, occupiedHexes(G, playerID)).has(target)) {
 				return 'Not enough movement to reach that space';
 			}
+			if (args[1] === true && !entrancePath(G.board, p.position, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)) {
+				return 'Not enough movement to get there through the entrance';
+			}
 			return true;
 		}
 
@@ -995,10 +1039,12 @@ const moves = {
 		log(G, playerID, `fired the ${def.name}: rolled ${roll}${mods} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 
-	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string) => {
+	/** Fly to `target`. From a planet, `viaEntrance` leaves by the planet's entrance instead of crossing its shield. */
+	moveShip: guarded('moveShip', ({ G, playerID, random, events }, target: string, viaEntrance?: boolean) => {
 		const p = G.players[playerID];
-		const path = movePath(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)!;
-		log(G, playerID, `moves ${path.length} space${path.length === 1 ? '' : 's'}`);
+		const route = viaEntrance ? entrancePath : movePath;
+		const path = route(G.board, p.position!, target, G.turn.movement, new Set(G.explorationSpaces), p.bounty > 0)!;
+		log(G, playerID, `moves ${path.length} space${path.length === 1 ? '' : 's'}${viaEntrance ? ', leaving by the entrance' : ''}`);
 		// Collecting a token is a minor action: tokens on the way are flipped without stopping.
 		flyPath({ G, playerID, random, events } as MoveCtx, path);
 	}),

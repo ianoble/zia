@@ -19,6 +19,7 @@ import { ECONOMY_CUBES, type EconomyCube } from '../../logic/types';
 import { CUBE_FILL } from '../ship/shipMatTheme';
 import { boardHexes, edgeSymbolFacing, gateDestinations, onTigrisGate, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
+import PromptDialog from './PromptDialog.vue';
 import { explorationTokenLabel } from '../../data/exploration';
 import { engineRollResult, shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
@@ -126,30 +127,38 @@ watch(
 		Waiting for <strong>{{ nameOf(currentPlayer) }}</strong> to take their turn.
 	</div>
 
-	<div v-else-if="ship && def && crossing && !pendingDamage.length && !pendingCargo.length && !pairPending" class="space-y-2 rounded-lg border border-amber-700/70 bg-slate-900/70 p-3 text-sm">
-		<template v-if="crossing.stage === 'confirm'">
-			<p class="font-semibold text-amber-200">Border ahead: {{ crossing.borders.map((b) => BORDER_INFO[b].name).join(', then ') }}</p>
+	<div v-else-if="ship && def && crossing && !pendingDamage.length && !pendingCargo.length && !pairPending" class="rounded-lg border border-amber-700/70 bg-slate-900/70 p-3 text-sm text-amber-200">
+		Your move is paused at a border: answer the prompt to carry on.
+		<PromptDialog
+			v-if="crossing.stage === 'confirm'"
+			tone="amber"
+			:title="`Border ahead: ${crossing.borders.map((b) => BORDER_INFO[b].name).join(', then ')}`"
+		>
 			<p v-for="b in crossing.borders" :key="b" class="text-xs text-slate-400">
 				<span class="text-slate-300">{{ BORDER_INFO[b].name }}:</span> {{ BORDER_INFO[b].odds }}
 			</p>
-			<div class="grid gap-2" :class="crossing.forced ? '' : 'grid-cols-2'">
-				<button class="action justify-center" @click="emit('act', 'crossBorder')">Roll d20</button>
-				<button v-if="!crossing.forced" class="action justify-center" @click="emit('act', 'stopMove')">Stop here</button>
-			</div>
-		</template>
-		<template v-else>
-			<p class="font-semibold text-amber-200">
-				Rolled {{ crossing.roll }}: {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }} to take
-			</p>
+			<p v-if="!crossing.forced" class="text-xs text-slate-400">Stopping here keeps the rest of your movement.</p>
+			<template #actions>
+				<button @click="emit('act', 'crossBorder')"><span>Roll d20</span><span class="text-amber-300">cross</span></button>
+				<button v-if="!crossing.forced" @click="emit('act', 'stopMove')"><span>Stop here</span><span class="text-slate-400">{{ movement }} movement left</span></button>
+			</template>
+		</PromptDialog>
+		<PromptDialog
+			v-else
+			tone="amber"
+			:title="`Rolled ${crossing.roll}: ${crossing.amount} ${crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss'} to take`"
+		>
 			<p class="text-xs text-slate-400">Fire a shield to cut it down (uses an armed marker), or take it.</p>
-			<button v-for="s in shieldChoices" :key="s.uid" class="action" @click="emit('act', 'useShield', s.uid)">
-				<span>Fire {{ s.def.name }}</span>
-				<span class="text-sky-300">roll {{ s.def.die }}</span>
-			</button>
-			<button class="action justify-center" @click="emit('act', 'acceptBorderEffect')">
-				Take {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }}
-			</button>
-		</template>
+			<template #actions>
+				<button v-for="s in shieldChoices" :key="s.uid" @click="emit('act', 'useShield', s.uid)">
+					<span>Fire {{ s.def.name }}</span>
+					<span class="text-sky-300">roll {{ s.def.die }}</span>
+				</button>
+				<button @click="emit('act', 'acceptBorderEffect')">
+					<span>Take {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }}</span>
+				</button>
+			</template>
+		</PromptDialog>
 	</div>
 
 	<div v-else-if="ship && def && pendingDamage.length" class="space-y-2 rounded-lg border border-red-800/70 bg-slate-900/70 p-3 text-sm">
@@ -168,13 +177,15 @@ watch(
 		<button class="action justify-center" @click="emit('act', 'jettisonCargo')">Jettison it instead</button>
 	</div>
 
-	<div v-else-if="ship && def && pairPending" class="space-y-3 rounded-lg border border-fuchsia-800/70 bg-slate-900/70 p-3 text-sm">
-		<p class="font-semibold text-fuchsia-200">You have two exploration tokens face up.</p>
-		<p class="text-xs text-slate-400">Discard both and choose a reward:</p>
-		<div class="grid grid-cols-2 gap-2">
-			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'fame')">1 fame</button>
-			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'credits')">2,000 credits</button>
-		</div>
+	<div v-else-if="ship && def && pairPending" class="rounded-lg border border-fuchsia-800/70 bg-slate-900/70 p-3 text-sm text-fuchsia-200">
+		Choose a reward for your two exploration tokens.
+		<PromptDialog tone="fuchsia" title="You have two exploration tokens face up">
+			<p class="text-xs text-slate-400">Discard both and choose a reward:</p>
+			<template #actions>
+				<button @click="emit('act', 'claimExplorationPair', 'fame')"><span>1 fame</span></button>
+				<button @click="emit('act', 'claimExplorationPair', 'credits')"><span>2,000 credits</span></button>
+			</template>
+		</PromptDialog>
 	</div>
 
 	<div v-else-if="ship && def && docked" class="space-y-3 rounded-lg border border-teal-800/70 bg-slate-900/70 p-3 text-sm">

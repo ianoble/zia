@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
 import { gameDef, gateDestinations, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
-import { shipsForSale } from '../logic/game';
+import { planetExitChoice, shipsForSale, type PlanetExitChoice } from '../logic/game';
 import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { cargoTargets, damageTargets, missionLimit } from '../logic/ship';
@@ -16,6 +16,7 @@ import { PLAYER_HEX } from '../components/ship/shipMatTheme';
 import ShipPicker from '../components/setup/ShipPicker.vue';
 import OutfitShop from '../components/setup/OutfitShop.vue';
 import TurnPanel from '../components/play/TurnPanel.vue';
+import PromptDialog from '../components/play/PromptDialog.vue';
 import EconomyBoard from '../components/play/EconomyBoard.vue';
 import ZiaLog from '../components/ZiaLog.vue';
 
@@ -120,8 +121,29 @@ function onHexClick(key: string) {
 		move('useGate', key);
 		return;
 	}
-	if (reachable.value?.has(key)) move('moveShip', key);
-	else if (jumpTargets.value?.includes(key)) move('blindJump', key);
+	if (reachable.value?.has(key)) {
+		// Leaving a planet the short way would cross its shield: ask whether to use the entrance.
+		const choice = G.value ? planetExitChoice(G.value, props.playerID, key) : null;
+		if (choice) exitPrompt.value = { target: key, choice, step: 'how' };
+		else move('moveShip', key);
+	} else if (jumpTargets.value?.includes(key)) move('blindJump', key);
+}
+
+/** Moving off a planet: cross the shield, or leave by the entrance (maybe stopping just outside). */
+const exitPrompt = ref<{ target: string; choice: PlanetExitChoice; step: 'how' | 'unreachable' } | null>(null);
+const shortestCost = computed(() => (exitPrompt.value ? (reachable.value?.get(exitPrompt.value.target) ?? 0) : 0));
+watch([isMyTurn, () => G.value?.turn?.movement, () => G.value?.players?.[props.playerID]?.position], () => (exitPrompt.value = null));
+function exitAnswer(answer: 'shield' | 'entrance' | 'outside') {
+	const e = exitPrompt.value;
+	if (!e) return;
+	if (answer === 'entrance' && !e.choice.viaEntrance) {
+		e.step = 'unreachable';
+		return;
+	}
+	exitPrompt.value = null;
+	if (answer === 'shield') move('moveShip', e.target);
+	else if (answer === 'entrance') move('moveShip', e.target, true);
+	else move('moveShip', e.choice.outside, true);
 }
 
 function act(name: string, ...args: unknown[]) {
@@ -402,6 +424,35 @@ onUnmounted(() => disconnect());
 				:can-discard="isMyTurn && !me?.drawnMissions?.length"
 				@discard="(id) => act('discardMission', id)"
 			/>
+			<PromptDialog v-if="exitPrompt?.step === 'how'" title="Leaving the planet" dismissible @close="exitPrompt = null">
+				<p>The shortest way to that space crosses the planetary shield. You can leave by the planet's entrance instead.</p>
+				<p class="text-xs text-slate-400">
+					Planetary shield roll: 1–10 unblockable damage equal to the roll and you stay put (−1 movement) · 11–17 through, +1,000 bounty · 18–20 through.
+				</p>
+				<template #actions>
+					<button @click="exitAnswer('shield')"><span>Cross the shield</span><span class="text-amber-300">{{ shortestCost }} movement, roll d20</span></button>
+					<button @click="exitAnswer('entrance')">
+						<span>Leave by the entrance</span>
+						<span class="text-sky-300">{{ exitPrompt.choice.viaEntrance ? `${exitPrompt.choice.viaEntrance.length} movement` : 'too far' }}</span>
+					</button>
+					<button class="secondary" @click="exitPrompt = null">Cancel</button>
+				</template>
+			</PromptDialog>
+			<PromptDialog v-else-if="exitPrompt?.step === 'unreachable'" title="Out of reach through the entrance" dismissible @close="exitPrompt = null">
+				<p>
+					Going by the entrance, that space needs {{ Number.isFinite(exitPrompt.choice.entranceCost) ? exitPrompt.choice.entranceCost : 'more' }} movement;
+					you have {{ G.turn.movement }}.
+				</p>
+				<p v-if="exitPrompt.choice.canStopOutside">You can fly out of the entrance and stop just outside, keeping the rest of your movement.</p>
+				<p v-else class="text-xs text-slate-400">You can't stop just outside the entrance either (another ship is there, or it's out of reach).</p>
+				<template #actions>
+					<button v-if="exitPrompt.choice.canStopOutside" @click="exitAnswer('outside')">
+						<span>Fly out and stop outside the entrance</span><span class="text-sky-300">{{ exitPrompt.choice.outsideCost }} movement</span>
+					</button>
+					<button @click="exitAnswer('shield')"><span>Cross the shield instead</span><span class="text-amber-300">roll d20</span></button>
+					<button class="secondary" @click="exitPrompt = null">Cancel</button>
+				</template>
+			</PromptDialog>
 			<MissionChoice
 				v-if="isMyTurn && me?.drawnMissions?.length"
 				:cards="me.drawnMissions"
