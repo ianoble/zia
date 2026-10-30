@@ -144,6 +144,18 @@ export interface TurnState {
 	luckUsed?: boolean;
 	/** A move stopped at a border, waiting for the captain (see BorderCrossing). */
 	crossing?: BorderCrossing | null;
+	/** A failed Mine / Harvest roll, waiting for the captain to fire shields or take it. */
+	hazard?: ExtractionHazard | null;
+}
+
+/** Mine, Harvest and Salvage spaces (rulebook p16). */
+export type ExtractionKind = 'mine' | 'harvest' | 'salvage';
+
+/** A Mine (damage) or Harvest (energy loss) roll of 1-10: shields may cut `amount` down first. */
+export interface ExtractionHazard {
+	kind: 'mine' | 'harvest';
+	roll: number;
+	amount: number;
 }
 
 /**

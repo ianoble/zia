@@ -6,6 +6,7 @@ import {
 	BUY_MAX,
 	BUY_PRICE,
 	checkMove,
+	extractionHere,
 	freeEngineUseSpaces,
 	repairCost,
 	SELL_PRICE,
@@ -73,6 +74,14 @@ const shieldChoices = computed(() =>
 			})
 		: [],
 );
+/** Mine / Harvest / Salvage on the space the ship is on, and a failed roll waiting for shields. */
+const extraction = computed(() => extractionHere(props.G, props.playerID));
+const hazard = computed(() => props.G.turn.hazard ?? null);
+const EXTRACT_INFO = {
+	mine: { verb: 'Mine', odds: '1–10: damage equal to the roll (shields can cut it) · 11–20: one cube' },
+	harvest: { verb: 'Harvest', odds: '1–10: lose energy equal to the roll, then armed markers (shields can cut it) · 11–20: one cube' },
+	salvage: { verb: 'Salvage', odds: '1–3: the ship is destroyed (shields can\'t help) · 4–20: one cube' },
+} as const;
 /** Starport Phase: dock at a planet, then use its services. */
 const atPort = computed(() => atStarport(props.G, props.playerID));
 const docked = computed(() => !!props.G.turn.starport);
@@ -156,6 +165,22 @@ watch(
 				</button>
 				<button @click="emit('act', 'acceptBorderEffect')">
 					<span>Take {{ crossing.amount }} {{ crossing.borders[0] === 'asteroid' ? 'damage' : 'energy loss' }}</span>
+				</button>
+			</template>
+		</PromptDialog>
+	</div>
+
+	<div v-else-if="ship && def && hazard && !pendingDamage.length && !pendingCargo.length && !pairPending" class="rounded-lg border border-amber-700/70 bg-slate-900/70 p-3 text-sm text-amber-200">
+		Fire a shield or take the {{ hazard.kind === 'mine' ? 'damage' : 'energy loss' }}.
+		<PromptDialog tone="amber" :title="`Rolled ${hazard.roll} ${hazard.kind === 'mine' ? 'mining' : 'harvesting'}: ${hazard.amount} ${hazard.kind === 'mine' ? 'damage' : 'energy loss'} to take`">
+			<p class="text-xs text-slate-400">Fire a shield to cut it down (uses an armed marker), or take it.</p>
+			<template #actions>
+				<button v-for="s in shieldChoices" :key="s.uid" @click="emit('act', 'useShield', s.uid)">
+					<span>Fire {{ s.def.name }}</span>
+					<span class="text-sky-300">roll {{ s.def.die }}</span>
+				</button>
+				<button @click="emit('act', 'acceptBorderEffect')">
+					<span>Take {{ hazard.amount }} {{ hazard.kind === 'mine' ? 'damage' : 'energy loss' }}</span>
 				</button>
 			</template>
 		</PromptDialog>
@@ -340,6 +365,24 @@ watch(
 					<span class="text-amber-300">+{{ SELL_PRICE.toLocaleString('en-US') }} cR</span>
 				</button>
 			</template>
+		</div>
+
+		<div v-if="extraction" class="space-y-2 rounded-lg border border-orange-900/60 bg-orange-950/20 p-2">
+			<span class="font-semibold text-slate-300">{{ EXTRACT_INFO[extraction.kind].verb }}</span>
+			<button
+				class="action"
+				:disabled="!can('extract')"
+				:title="can('extract') ? '' : 'You need a free space in your hold'"
+				@click="emit('act', 'extract')"
+			>
+				<span class="flex items-center gap-2">
+					<span class="h-3.5 w-3.5 rounded-sm" :style="{ background: CUBE_FILL[extraction.color] }" />
+					{{ EXTRACT_INFO[extraction.kind].verb }} {{ extraction.color }}
+				</span>
+				<span class="text-orange-300">roll d20</span>
+			</button>
+			<p class="text-xs text-slate-400">{{ EXTRACT_INFO[extraction.kind].odds }}</p>
+			<p class="text-xs text-slate-500">Standard action (ends movement), repeatable. Needs a free hold space; the cube comes from the general supply.</p>
 		</div>
 
 		<div v-if="atPort" class="space-y-2 rounded-lg border border-teal-900/60 bg-teal-950/20 p-2">

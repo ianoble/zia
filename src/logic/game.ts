@@ -42,6 +42,7 @@ import {
 	PLAYER_COLORS,
 	type CubeColor,
 	type EconomyCube,
+	type ExtractionKind,
 	type DamageKind,
 	type PlacedOutfit,
 	type Rotation,
@@ -474,6 +475,12 @@ function resolveBorders(c: MoveCtx) {
 	finishCrossing(c);
 }
 
+/** Shields are done (or skipped): take what's left of a Mine / Harvest roll, or of a border and fly on. */
+function takeShieldedEffect(c: MoveCtx) {
+	if (c.G.turn.hazard) takeHazard(c);
+	else if (takeBorderEffect(c)) resolveBorders(c);
+}
+
 /** The step's borders are all resolved: move into the space and carry on. */
 function finishCrossing(c: MoveCtx, stopAfter = false) {
 	const { G } = c;
@@ -507,21 +514,31 @@ function takeBorderEffect(c: MoveCtx): boolean {
 			return false;
 		}
 	}
-	if (kind === 'nebula' && amount > 0) {
-		// Energy first, then armed markers (one per energy short). Impulse isn't affected.
-		const fromEnergy = Math.min(ship.energy, amount);
-		ship.energy -= fromEnergy;
-		const disarm = Math.min(ship.armedMarkers, amount - fromEnergy);
-		ship.armedMarkers -= disarm;
-		ship.disarmedMarkers += disarm;
-		log(G, playerID, `lost ${fromEnergy} energy${disarm ? ` and ${disarm} armed marker${disarm === 1 ? '' : 's'}` : ''} in the nebula`);
-		if (ship.energy === 0 && ship.armedMarkers === 0) {
-			log(G, playerID, 'is stranded: unspent movement is lost');
-			finishCrossingAfterStranding(c);
-			return false;
-		}
+	if (kind === 'nebula' && amount > 0 && loseEnergy(G, playerID, amount)) {
+		finishCrossingAfterStranding(c);
+		return false;
 	}
 	return true;
+}
+
+/**
+ * Nebula energy loss (borders and Harvest): energy first, then armed markers (one per
+ * energy short). Impulse isn't affected. True if the ship is left stranded.
+ */
+function loseEnergy(G: ZiaState, seat: string, amount: number): boolean {
+	const ship = G.players[seat].ship!;
+	const fromEnergy = Math.min(ship.energy, amount);
+	ship.energy -= fromEnergy;
+	const disarm = Math.min(ship.armedMarkers, amount - fromEnergy);
+	ship.armedMarkers -= disarm;
+	ship.disarmedMarkers += disarm;
+	log(G, seat, `lost ${fromEnergy} energy${disarm ? ` and ${disarm} armed marker${disarm === 1 ? '' : 's'}` : ''} in the nebula`);
+	if (ship.energy === 0 && ship.armedMarkers === 0) {
+		log(G, seat, 'is stranded: unspent movement is lost');
+		G.turn.movement = 0;
+		return true;
+	}
+	return false;
 }
 
 /** Stranded in a nebula: the ship is inside it, but its movement is gone. */
@@ -565,6 +582,36 @@ const cargoRoom = (p: ZiaPlayer) => cargoTargets(p.ship!).length - p.pendingCarg
 function endMovement(G: ZiaState, seat: string) {
 	if (G.turn.movement > 0) log(G, seat, `(${G.turn.movement} unspent movement lost)`);
 	G.turn.movement = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Mine, Harvest, Salvage (rulebook p15-16)
+// ---------------------------------------------------------------------------
+
+const EXTRACT_CUBES: Record<string, EconomyCube> = { S: 'spice', H: 'holo', T: 'terra', P: 'plasma', C: 'cyber' };
+const EXTRACT_VERB: Record<ExtractionKind, string> = { mine: 'Mine', harvest: 'Harvest', salvage: 'Salvage' };
+
+/** The Mine / Harvest / Salvage space the ship is on, with the cube it yields (from the tile's "Harvest H" etc.). */
+export function extractionHere(G: ZiaState, seat: string): { kind: ExtractionKind; color: EconomyCube } | null {
+	const pos = G.players[seat]?.position;
+	const h = pos ? boardHexes(G.board).get(pos) : null;
+	if (!h) return null;
+	const kind = (['mine', 'harvest', 'salvage'] as const).find((k) => h.kinds.includes(k));
+	if (!kind) return null;
+	const feature = SECTORS_BY_ID[G.board.sectors[h.sectorIndex].tileId]?.features.find((f) => f.startsWith(`${EXTRACT_VERB[kind]} `));
+	const color = feature ? EXTRACT_CUBES[feature.split(' ')[1]] : undefined;
+	return color ? { kind, color } : null;
+}
+
+/** Take what's left of a failed Mine (damage) or Harvest (energy loss) roll. */
+function takeHazard(c: MoveCtx) {
+	const { G, playerID, events } = c;
+	const hazard = G.turn.hazard!;
+	G.turn.hazard = null;
+	if (hazard.amount <= 0) return;
+	if (hazard.kind === 'mine') {
+		if (takeDamage(G, playerID, 'damage', hazard.amount, 'an asteroid collision filled the hold')) events.endTurn();
+	} else loseEnergy(G, playerID, hazard.amount);
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +746,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (G.turn.crossing && !RESOLVING_MOVES.has(moveName) && !CROSSING_MOVES.has(moveName)) {
 		return 'Finish crossing the border first (roll, or stop short)';
 	}
+	if (G.turn.hazard && !RESOLVING_MOVES.has(moveName) && moveName !== 'useShield' && moveName !== 'acceptBorderEffect') {
+		return G.turn.hazard.kind === 'mine' ? 'First fire shields or take the damage' : 'First fire shields or take the energy loss';
+	}
 	// Damage and cubes to place and exploration pairs to cash in come before anything else.
 	if (!RESOLVING_MOVES.has(moveName)) {
 		if (p.pendingDamage?.length) return 'First place your damage: click a space in your hold';
@@ -825,11 +875,18 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			return G.turn.crossing.forced ? 'A Blind Jump has to go in' : true;
 
 		case 'useShield':
-			if (G.turn.crossing?.stage !== 'shield' || !p.ship) return 'No roll to shield against';
+			if (!(G.turn.crossing?.stage === 'shield' || G.turn.hazard) || !p.ship) return 'No roll to shield against';
 			return usableShields(p.ship).includes(args[0] as string) ? true : "That shield can't fire";
 
 		case 'acceptBorderEffect':
-			return G.turn.crossing?.stage === 'shield' ? true : 'Nothing to take';
+			return G.turn.crossing?.stage === 'shield' || G.turn.hazard ? true : 'Nothing to take';
+
+		case 'extract': {
+			if (G.stage !== 'play' || !p.ship || !p.position) return 'Not during setup';
+			if (!extractionHere(G, playerID)) return 'Fly to a Mine, Harvest or Salvage space first';
+			if (cargoRoom(p) < 1) return 'You need a free space in your hold';
+			return true;
+		}
 
 		case 'chooseMissions': {
 			if (!p.drawnMissions?.length || !p.ship) return 'No mission cards to choose from';
@@ -965,7 +1022,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
 
 /** Action Phase moves, not allowed once docked at a starport. */
-const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'crossBorder', 'stopMove', 'useGate']);
+const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'extract', 'crossBorder', 'stopMove', 'useGate']);
 
 /** Moves for a move paused at a border. */
 const CROSSING_MOVES = new Set(['crossBorder', 'stopMove', 'useShield', 'acceptBorderEffect']);
@@ -1070,11 +1127,11 @@ const moves = {
 		log(c.G, c.playerID, 'stopped short of the border');
 	}),
 
-	/** After a bad asteroid / nebula roll: fire a shield to cut it down (Shields Up, a minor action). */
+	/** After a bad asteroid / nebula roll (border, Mine or Harvest): fire a shield to cut it down (Shields Up, a minor action). */
 	useShield: guarded('useShield', (c, uid: string) => {
 		const { G, playerID, random } = c;
 		const ship = G.players[playerID].ship!;
-		const cross = G.turn.crossing!;
+		const cross: { amount?: number } = G.turn.hazard ?? G.turn.crossing!;
 		const o = ship.outfits.find((x) => x.uid === uid)!;
 		const def = OUTFITS_BY_ID[o.outfitId];
 		o.usedSpaces.push(freeUseSpaces(ship, uid, 'shield')[0]);
@@ -1089,14 +1146,39 @@ const moves = {
 		const block = Math.max(1, roll - penalty);
 		cross.amount = Math.max(0, (cross.amount ?? 0) - block);
 		log(G, playerID, `fired the ${def.name}: ${enviro ? `${sides} (Enviro-Shld)` : `rolled ${roll}`}${penalty ? ` −${penalty} damage` : ''}, blocking ${block}; ${cross.amount} left`);
-		if (cross.amount === 0 || !usableShields(ship).length) {
-			if (takeBorderEffect(c)) resolveBorders(c);
-		}
+		if (cross.amount === 0 || !usableShields(ship).length) takeShieldedEffect(c);
 	}),
 
-	/** After a bad asteroid / nebula roll: take what's left and fly on. */
-	acceptBorderEffect: guarded('acceptBorderEffect', (c) => {
-		if (takeBorderEffect(c)) resolveBorders(c);
+	/** After a bad asteroid / nebula roll: take what's left (and fly on, at a border). */
+	acceptBorderEffect: guarded('acceptBorderEffect', (c) => takeShieldedEffect(c)),
+
+	/**
+	 * Mine / Harvest / Salvage (standard action, rulebook p16): needs a free hold space;
+	 * roll the d20. Mine 1-10: that much damage; Harvest 1-10: that much energy loss
+	 * (shields may cut either down first); Salvage 1-3: the ship is destroyed. Otherwise
+	 * one cube of the space's type from the general supply. Repeatable.
+	 */
+	extract: guarded('extract', (c) => {
+		const { G, playerID, random, events } = c;
+		const p = G.players[playerID];
+		const { kind, color } = extractionHere(G, playerID)!;
+		endMovement(G, playerID);
+		const roll = rollDie(G, playerID, random, 20);
+		const verb = { mine: 'mining', harvest: 'harvesting', salvage: 'salvaging' }[kind];
+		if (kind === 'salvage' && roll <= 3) {
+			log(G, playerID, `rolled ${roll} salvaging: something in the wreckage detonated`);
+			destroyShip(G, playerID, 'blown up while salvaging');
+			events.endTurn();
+			return;
+		}
+		if (kind !== 'salvage' && roll <= 10) {
+			log(G, playerID, `rolled ${roll} ${verb}: ${roll} ${kind === 'mine' ? 'damage' : 'energy loss'}`);
+			G.turn.hazard = { kind, roll, amount: roll };
+			if (!usableShields(p.ship!).length) takeHazard(c);
+			return;
+		}
+		gainCargo(G, playerID, color);
+		log(G, playerID, `rolled ${roll} ${verb}: got a ${color} cube`);
 	}),
 
 	/** Place one pending damage on a hold space or outfit section of the captain's choice. */
@@ -1441,7 +1523,7 @@ const ZiaGame: Game<ZiaState> = {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
 				onBegin: ({ G, ctx, random }) => {
-					G.turn = { movement: 0, explorationPairPending: false, crossing: null, missionDraws: [], starport: false };
+					G.turn = { movement: 0, explorationPairPending: false, crossing: null, hazard: null, missionDraws: [], starport: false };
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},

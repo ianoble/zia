@@ -210,6 +210,12 @@ function tradeText(tileId: string, kind: 'Buy' | 'Sell'): string {
 	return f ? `${kind} ${CUBE_NAMES[f.slice(kind.length + 1)] ?? f.slice(kind.length + 1)}` : kind;
 }
 
+/** "Harvest H" → "Harvest Holo" for the tile's Mine / Harvest / Salvage feature. */
+function extractText(tileId: string, verb: 'Mine' | 'Harvest' | 'Salvage'): string {
+	const f = SECTORS_BY_ID[tileId]?.features.find((x) => x.startsWith(`${verb} `));
+	return f ? `${verb} ${CUBE_NAMES[f.slice(verb.length + 1)] ?? f.slice(verb.length + 1)}` : verb;
+}
+
 /** What's on each space, with what happens when a ship enters (rulebook p10, p20), for its tooltip. */
 const hexTitles = computed(() => {
 	const tokens = new Set(props.explorationSpaces ?? []);
@@ -242,9 +248,12 @@ const hexTitles = computed(() => {
 			lines.push(`${tradeText(tileId, 'Buy')}: buy up to ${BUY_MAX} cubes for ${cr(BUY_PRICE)}, from the Economy Board (standard action, ends movement).`);
 		if (k.includes('sell'))
 			lines.push(`${tradeText(tileId, 'Sell')}: sell cubes for ${cr(SELL_PRICE)} each (standard action, ends movement). Selling 2 or more, and every cube you have that it buys, is a Big Shipment: +1 fame.`);
-		if (k.includes('harvest')) lines.push('Harvest space (coming later).');
-		if (k.includes('salvage')) lines.push('Salvage space (coming later).');
-		if (k.includes('mine')) lines.push('Mining space (coming later).');
+		if (k.includes('harvest'))
+			lines.push(`${extractText(tileId, 'Harvest')}: roll a d20 (standard action, needs a free hold space). 1–10 lose that much energy (shields can cut it), 11–20 one cube.`);
+		if (k.includes('salvage'))
+			lines.push(`${extractText(tileId, 'Salvage')}: roll a d20 (standard action, needs a free hold space). 1–3 the ship is destroyed, 4–20 one cube.`);
+		if (k.includes('mine'))
+			lines.push(`${extractText(tileId, 'Mine')}: roll a d20 (standard action, needs a free hold space). 1–10 that much damage (shields can cut it), 11–20 one cube.`);
 		if (k.includes('mission')) lines.push(`Mission point: fly onto or over it (with a free mission slot) to draw ${MISSION_DRAW} mission cards at the end of your turn.`);
 		if (k.includes('spawn')) lines.push(`Spawn point ${h.spawnNumber ?? ''}`.trim() + '.');
 		if (k.includes('exploration')) lines.push(tokens.has(h.key) ? 'Exploration space: a face-down token, flipped by the first ship to fly onto it.' : 'Exploration space (its token has been taken).');
