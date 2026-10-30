@@ -298,13 +298,6 @@ watch(
 			<p v-else class="text-xs text-slate-500">No other gate has been found yet (the Tigris gate can't be a destination).</p>
 		</div>
 
-		<div v-if="atPort" class="space-y-2 rounded-lg border border-teal-900/60 bg-teal-950/20 p-2">
-			<button class="action" @click="emit('act', 'enterStarport')">
-				<span>Dock at the starport</span><span class="text-teal-300">ends your actions</span>
-			</button>
-			<p class="text-xs text-slate-500">Starport Phase: recharge, repair, thaw, outfitters, buy fame. Arming is free at a starport.</p>
-		</div>
-
 		<div v-if="trade" class="space-y-2 rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-2">
 			<span class="font-semibold text-slate-300">Trade</span>
 			<template v-if="trade.buy">
@@ -336,6 +329,13 @@ watch(
 					<span class="text-amber-300">+{{ SELL_PRICE.toLocaleString('en-US') }} cR</span>
 				</button>
 			</template>
+		</div>
+
+		<div v-if="atPort" class="space-y-2 rounded-lg border border-teal-900/60 bg-teal-950/20 p-2">
+			<button class="action" @click="emit('act', 'enterStarport')">
+				<span>Dock at the starport</span><span class="text-teal-300">ends your actions</span>
+			</button>
+			<p class="text-xs text-slate-500">Starport Phase: recharge, repair, thaw, outfitters, buy fame. Arming is free at a starport.</p>
 		</div>
 
 		<div class="space-y-2 border-t border-slate-800 pt-3">
