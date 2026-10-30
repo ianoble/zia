@@ -46,7 +46,7 @@ export type HexSide = keyof typeof HEX_SIDE;
 /**
  * Which way each planet's entrance faces, by tile number (tile upright). The entrance is
  * the single shield edge furthest out that way (see entranceEdge in sectors.ts).
- * From the captain's notes; Loath's matches the photo. Smugglers' Den: not known yet.
+ * From the captain's notes; Loath's matches the photo.
  */
 export const PLANET_ENTRANCES: Record<number, HexSide> = {
 	1: 'NW', // Neo Damascus
@@ -55,6 +55,7 @@ export const PLANET_ENTRANCES: Record<number, HexSide> = {
 	4: 'NW', // Doravin V
 	5: 'NW', // Loath
 	6: 'NE', // Lunari
+	18: 'NW', // Smugglers' Den
 };
 
 /** The hexes of a layout with their codes, in local coordinates. */

@@ -114,5 +114,7 @@ describe('planetary entrances', () => {
 	it("Loath's is the upper-left side of the planet hex left of centre (as in the photo); Azure's is up-right", () => {
 		expect(SECTORS_BY_ID['loath'].entrance).toEqual({ at: { q: -1, r: 0 }, direction: 3 });
 		expect(SECTORS_BY_ID['azure'].entrance).toEqual({ at: { q: 1, r: -1 }, direction: 5 });
+		// Smugglers' Den: the upper-left side of its centre hex (the base's furthest north-west edge).
+		expect(SECTORS_BY_ID['smugglers-den'].entrance).toEqual({ at: { q: 0, r: 0 }, direction: 3 });
 	});
 });
