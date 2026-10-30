@@ -513,6 +513,40 @@ function endMovement(G: ZiaState, seat: string) {
 	G.turn.movement = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Starport Phase (rulebook p18)
+// ---------------------------------------------------------------------------
+
+export const WEALTH_PRICE = 5000;
+
+/** A starport: any space inside a planetary shield. (The Kiln comes later; Dead Worlds aren't planets.) */
+export function atStarport(G: ZiaState, seat: string): boolean {
+	const pos = G.players[seat]?.position;
+	return !!pos && !!boardHexes(G.board).get(pos)?.kinds.includes('planet');
+}
+
+/** Repairing all normal damage: 1,000 for Tier I-II ships, 2,000 for Tier III. */
+export const repairCost = (ship: ShipState) => (shipDef(ship).tier >= 3 ? 2000 : 1000);
+
+/** Selling an outfit: half its price, rounded up to the next 1,000 (I and II: 1,000, III: 2,000). */
+export const outfitSellPrice = (outfitId: string) => Math.ceil(OUTFITS_BY_ID[outfitId].cost / 2 / 1000) * 1000;
+
+/** Hold cells an outfit sits on that have damage. */
+const outfitDamaged = (ship: ShipState, o: PlacedOutfit) => {
+	const damaged = damagedCells(ship);
+	return placedCells(o).some((c) => damaged.has(cellKey(c.x, c.y)));
+};
+
+/** Starport rule: outfits can't go on damaged spaces or on cargo (move the cubes first). */
+function clearOfDamageAndCargo(ship: ShipState, o: PlacedOutfit): true | string {
+	const damaged = damagedCells(ship);
+	const cargo = new Set(ship.cargo.map((c) => c.cell));
+	const cells = placedCells(o).map((c) => cellKey(c.x, c.y));
+	if (cells.some((k) => damaged.has(k))) return "Outfits can't go on damaged spaces";
+	if (cells.some((k) => cargo.has(k))) return 'Move the cargo out of the way first';
+	return true;
+}
+
 /** Draw a random mission card; the discard pile is reshuffled when the deck runs out. */
 function drawMissionCard(G: ZiaState, random: RandomApi): string | null {
 	if (!G.missionDeck.length) {
@@ -593,6 +627,8 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 	if (!p) return 'Unknown captain';
 	// Mission cards drawn at the end of the turn: choose which to keep before anything else.
 	if (p.drawnMissions?.length && moveName !== 'chooseMissions') return 'Choose which mission cards to keep first';
+	// Docked at a starport: the Action Phase is over.
+	if (G.turn.starport && ACTION_MOVES.has(moveName)) return "You're docked: the Action Phase is over";
 	// A move paused at a border has to be finished (or stopped) first.
 	if (G.turn.crossing && !RESOLVING_MOVES.has(moveName) && !CROSSING_MOVES.has(moveName)) {
 		return 'Finish crossing the border first (roll, or stop short)';
@@ -619,7 +655,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 		case 'buyOutfit':
 		case 'moveOutfit':
 		case 'returnOutfit': {
-			if (G.stage !== 'outfit') return 'Outfits can only be bought during setup for now';
+			if (G.stage !== 'outfit' && !(G.stage === 'play' && G.turn.starport)) return 'Outfits are bought at a starport (dock first)';
 			if (!p.ship) return 'Pick a ship first';
 			if (moveName === 'buyOutfit') {
 				const def = OUTFITS_BY_ID[args[0] as string];
@@ -628,11 +664,14 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 				if (G.supply[def.id] === 0) return `No ${def.name} left in the supply`;
 				const pos = placementArgs(args.slice(1));
 				if (!pos) return 'Bad placement';
-				return canPlaceOutfit(shipDef(p.ship), p.ship.outfits, { uid: '__new', outfitId: def.id, usedSpaces: [], ...pos });
+				const candidate = { uid: '__new', outfitId: def.id, usedSpaces: [], ...pos };
+				const fits = canPlaceOutfit(shipDef(p.ship), p.ship.outfits, candidate);
+				return fits === true ? clearOfDamageAndCargo(p.ship, candidate) : fits;
 			}
 			const uid = args[0] as string;
 			const existing = p.ship.outfits.find((o) => o.uid === uid);
 			if (!existing) return 'That outfit is not in your hold';
+			if (outfitDamaged(p.ship, existing)) return moveName === 'returnOutfit' ? "Damaged outfits can't be sold: repair first" : "Damaged outfits can't be moved";
 			if (moveName === 'returnOutfit') {
 				const rest = p.ship.outfits.filter((o) => o.uid !== uid);
 				return modsStillValid(p.ship, rest) ? true : 'Remove the mod sitting on it first';
@@ -642,6 +681,8 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			const moved = { ...existing, ...pos, usedSpaces: [] };
 			const ok = canPlaceOutfit(shipDef(p.ship), p.ship.outfits, moved);
 			if (ok !== true) return ok;
+			const clear = clearOfDamageAndCargo(p.ship, moved);
+			if (clear !== true) return clear;
 			const after = p.ship.outfits.map((o) => (o.uid === uid ? moved : o));
 			return modsStillValid(p.ship, after) ? true : 'Remove the mod sitting on it first';
 		}
@@ -758,6 +799,32 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			return true;
 		}
 
+		case 'enterStarport':
+			if (G.stage !== 'play' || !p.ship) return 'Not during setup';
+			if (G.turn.starport) return 'Already docked';
+			return atStarport(G, playerID) ? true : 'Starports are inside a planetary shield';
+
+		case 'rechargeEnergy':
+		case 'repairDamage':
+		case 'thawIce':
+		case 'buyFame':
+		case 'moveCargo': {
+			if (!G.turn.starport || !p.ship) return 'Dock at a starport first';
+			if (moveName === 'rechargeEnergy') return p.ship.energy < shipDef(p.ship).energy ? true : 'Energy is already full';
+			if (moveName === 'repairDamage') {
+				if (!p.ship.damage.length) return 'No damage to repair';
+				return p.credits >= repairCost(p.ship) ? true : `Repairs cost ${repairCost(p.ship).toLocaleString('en-US')} credits`;
+			}
+			if (moveName === 'thawIce') return p.ship.iceDamage.length ? true : 'No ice damage to thaw';
+			if (moveName === 'buyFame') {
+				if (p.credits < WEALTH_PRICE) return `Fame costs ${WEALTH_PRICE.toLocaleString('en-US')} credits`;
+				return p.fame + 1 >= G.fameTarget ? "The winning fame point can't be bought" : true;
+			}
+			const [from, to] = args as [string, string];
+			if (!p.ship.cargo.some((c) => c.cell === from)) return 'No cube there';
+			return cargoTargets(p.ship).includes(to) ? true : "A cube can't go there";
+		}
+
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
 			return args[0] === 'fame' || args[0] === 'credits' ? true : 'Choose fame or credits';
@@ -767,7 +834,7 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			const n = args[0] ?? 0;
 			if (!Number.isInteger(n) || (n as number) < 0) return 'Bad number of markers';
 			if ((n as number) > markersAvailableToArm(p.ship)) return 'Not that many markers to arm';
-			if ((n as number) > p.ship.energy) return 'Not enough energy to arm that many markers';
+			if ((n as number) > p.ship.energy && !atStarport(G, playerID)) return 'Not enough energy to arm that many markers';
 			return true;
 		}
 	}
@@ -776,6 +843,9 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 
 /** Moves that resolve something the captain must deal with first (damage, cubes, token pairs). */
 const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
+
+/** Action Phase moves, not allowed once docked at a starport. */
+const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'crossBorder', 'stopMove']);
 
 /** Moves for a move paused at a border. */
 const CROSSING_MOVES = new Set(['crossBorder', 'stopMove', 'useShield', 'acceptBorderEffect']);
@@ -823,9 +893,10 @@ const moves = {
 		const i = p.ship!.outfits.findIndex((o) => o.uid === uid);
 		const [o] = p.ship!.outfits.splice(i, 1);
 		const def = OUTFITS_BY_ID[o.outfitId];
-		p.credits += def.cost;
+		const refund = G.stage === 'outfit' ? def.cost : outfitSellPrice(o.outfitId);
+		p.credits += refund;
 		if (G.supply[o.outfitId] != null) G.supply[o.outfitId]++;
-		log(G, playerID, `returned a ${def.name}`);
+		log(G, playerID, G.stage === 'outfit' ? `returned a ${def.name}` : `sold a ${def.name} for ${refund.toLocaleString('en-US')} credits`);
 	}),
 
 	finishOutfitting: guarded('finishOutfitting', ({ G, playerID, events }) => {
@@ -1037,6 +1108,49 @@ const moves = {
 		endMovement(G, playerID);
 	}),
 
+	/** Dock: end the Action Phase at a starport and start the Starport Phase. */
+	enterStarport: guarded('enterStarport', ({ G, playerID }) => {
+		G.turn.starport = true;
+		endMovement(G, playerID);
+		log(G, playerID, 'docked at the starport');
+	}),
+
+	/** Starport: recharge energy to full, free. */
+	rechargeEnergy: guarded('rechargeEnergy', ({ G, playerID }) => {
+		const ship = G.players[playerID].ship!;
+		ship.energy = shipDef(ship).energy;
+		log(G, playerID, 'recharged their energy');
+	}),
+
+	/** Starport: remove all normal damage (1,000; 2,000 for Tier III). */
+	repairDamage: guarded('repairDamage', ({ G, playerID }) => {
+		const p = G.players[playerID];
+		const cost = repairCost(p.ship!);
+		p.credits -= cost;
+		p.ship!.damage = [];
+		log(G, playerID, `repaired all damage for ${cost.toLocaleString('en-US')} credits`);
+	}),
+
+	/** Starport [E]: remove all ice damage, free. */
+	thawIce: guarded('thawIce', ({ G, playerID }) => {
+		G.players[playerID].ship!.iceDamage = [];
+		log(G, playerID, 'thawed their ice damage');
+	}),
+
+	/** Starport: Throw Some Credits Around, 5,000 for 1 fame (never the winning point). */
+	buyFame: guarded('buyFame', ({ G, playerID }) => {
+		const p = G.players[playerID];
+		p.credits -= WEALTH_PRICE;
+		p.fame++;
+		log(G, playerID, `threw some credits around: ${WEALTH_PRICE.toLocaleString('en-US')} for 1 fame`);
+	}),
+
+	/** Starport: rearrange the hold, moving a cube to another free space. */
+	moveCargo: guarded('moveCargo', ({ G, playerID }, from: string, to: string) => {
+		const cube = G.players[playerID].ship!.cargo.find((c) => c.cell === from)!;
+		cube.cell = to;
+	}),
+
 	/** Jettison an active mission (allowed at any time, rulebook p12). */
 	discardMission: guarded('discardMission', ({ G, playerID }, id: string) => {
 		const p = G.players[playerID];
@@ -1053,8 +1167,10 @@ const moves = {
 		ship.abilityExhausted = false;
 		if (armCount > 0) {
 			armMarkers(ship, armCount);
-			ship.energy -= armCount;
-			log(G, playerID, `armed ${armCount} marker${armCount === 1 ? '' : 's'} (−${armCount} energy)`);
+			// Arming at a starport is free (rulebook p18).
+			const free = atStarport(G, playerID);
+			if (!free) ship.energy -= armCount;
+			log(G, playerID, `armed ${armCount} marker${armCount === 1 ? '' : 's'} (${free ? 'free at the starport' : `−${armCount} energy`})`);
 		}
 		// Status step 6 [E] In Demand: every empty Economy Board section gets 1,000 credits (max 1,000).
 		for (const c of ECONOMY_CUBES) if (G.economy[c].cubes === 0) G.economy[c].demand = 1000;
@@ -1106,7 +1222,7 @@ const ZiaGame: Game<ZiaState> = {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
 				onBegin: ({ G, ctx, random }) => {
-					G.turn = { movement: 0, explorationPairPending: false, crossing: null, missionDraws: [] };
+					G.turn = { movement: 0, explorationPairPending: false, crossing: null, missionDraws: [], starport: false };
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},

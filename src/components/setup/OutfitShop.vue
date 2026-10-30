@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { OUTFITS, OUTFITS_BY_ID, type OutfitDef, type OutfitType } from '../../data/outfits';
 import { autoPlace, occupancy, parseCellKey, parseShape, transformCells } from '../../logic/holdGeometry';
-import { checkMove } from '../../logic/game';
+import { checkMove, outfitSellPrice } from '../../logic/game';
+import { cargoTargets } from '../../logic/ship';
 import { shipDef } from '../../logic/ship';
 import type { PlayerColor, Rotation, ZiaState } from '../../logic/types';
 import ShipMat from '../ship/ShipMat.vue';
@@ -10,18 +11,27 @@ import type { HoldGhost } from '../ship/HoldGrid.vue';
 import { OUTFIT_FILL, CONNECTOR_FILL } from '../ship/shipMatTheme';
 
 /**
- * Setup step: buy starting outfits and place them in the hold.
+ * Outfitters: buy outfits and place them in the hold, at setup or at a starport.
  * Pick an outfit, move over the hold to preview it, R rotates, F flips, click to place.
- * Click a placed outfit to move or return it (full refund during setup).
+ * Click a placed outfit to move it, or return it (full refund during setup; sold for half,
+ * rounded up, at a starport). At a starport, click a cube and then a free space to move it.
  */
-const props = defineProps<{
-	G: ZiaState;
-	playerID: string;
-	currentPlayer: string;
-	color: PlayerColor;
-	captainName: string;
-}>();
-const emit = defineEmits<{ act: [name: string, ...args: unknown[]] }>();
+const props = withDefaults(
+	defineProps<{
+		G: ZiaState;
+		playerID: string;
+		currentPlayer: string;
+		color: PlayerColor;
+		captainName: string;
+		mode?: 'setup' | 'starport';
+	}>(),
+	{ mode: 'setup' },
+);
+const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; close: [] }>();
+const atStarport = computed(() => props.mode === 'starport');
+/** Starport: a cube picked up to move elsewhere in the hold. */
+const movingCube = ref<string | null>(null);
+const cubeTargets = computed(() => (movingCube.value ? cargoTargets(ship.value) : null));
 
 const me = computed(() => props.G.players[props.playerID]);
 const ship = computed(() => me.value.ship!);
@@ -119,6 +129,20 @@ function onCellClick(key: string) {
 		message.value = '';
 		return;
 	}
+	// Starport: move a cube (click it, then click a free space).
+	if (atStarport.value) {
+		if (movingCube.value) {
+			if (cubeTargets.value?.includes(key)) emit('act', 'moveCargo', movingCube.value, key);
+			movingCube.value = null;
+			return;
+		}
+		if (ship.value.cargo.some((c) => c.cell === key)) {
+			movingCube.value = key;
+			selectedUid.value = null;
+			message.value = 'Click a free space to move the cube there.';
+			return;
+		}
+	}
 	// Select the outfit under the cursor (mods on top win).
 	const here = occupancy(ship.value.outfits).get(key) ?? [];
 	const pick = here.find((c) => OUTFITS_BY_ID[c.outfitId].overlays) ?? here[0];
@@ -170,6 +194,8 @@ const credits = (n: number) => n.toLocaleString('en-US');
 				:ghost="ghost"
 				:margin="placing ? 1 : 0"
 				:selected-uid="selectedUid"
+				:targets="cubeTargets"
+				target-kind="cargo"
 				@cell-click="onCellClick"
 				@cell-hover="hover = $event"
 			/>
@@ -189,10 +215,16 @@ const credits = (n: number) => n.toLocaleString('en-US');
 				<template v-else-if="selected">
 					<span class="font-semibold">{{ OUTFITS_BY_ID[selected.outfitId].name }}</span>
 					<button class="btn" @click="startMove">Move</button>
-					<button class="btn" @click="returnSelected">Return (+{{ credits(OUTFITS_BY_ID[selected.outfitId].cost) }} cR)</button>
+					<button class="btn" @click="returnSelected">
+						{{ atStarport ? 'Sell' : 'Return' }} (+{{ credits(atStarport ? outfitSellPrice(selected.outfitId) : OUTFITS_BY_ID[selected.outfitId].cost) }} cR)
+					</button>
 					<button class="btn" @click="selectedUid = null">Deselect</button>
 				</template>
-				<span v-else class="text-slate-400">Choose an outfit from the shop, or click one in your hold to move or return it.</span>
+				<span v-else class="text-slate-400">
+					Choose an outfit from the shop, or click one in your hold to move or {{ atStarport ? 'sell' : 'return' }} it.<template v-if="atStarport">
+						Click a cube to move it.</template
+					>
+				</span>
 				<span v-if="message" class="w-full text-amber-300">{{ message }}</span>
 			</div>
 		</div>
@@ -203,7 +235,13 @@ const credits = (n: number) => n.toLocaleString('en-US');
 				<h3 class="text-lg font-bold">Outfitters</h3>
 				<span class="text-xl font-black text-amber-300">{{ credits(me.credits) }} <span class="text-sm">cR</span></span>
 			</div>
-			<p class="text-xs text-slate-400">Spend your starting credits. Anything left over stays with you.</p>
+			<p class="text-xs text-slate-400">
+				{{
+					atStarport
+						? 'Starport outfitters. Damaged outfits can’t be moved or sold, and nothing can go on damage or cargo.'
+						: 'Spend your starting credits. Anything left over stays with you.'
+				}}
+			</p>
 
 			<div v-for="g in groups" :key="g.label" class="space-y-1.5">
 				<h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">{{ g.label }}</h4>
@@ -235,9 +273,9 @@ const credits = (n: number) => n.toLocaleString('en-US');
 				type="button"
 				class="w-full rounded-lg bg-emerald-600 py-2.5 font-semibold transition-colors hover:bg-emerald-500 disabled:opacity-40"
 				:disabled="!myTurn"
-				@click="emit('act', 'finishOutfitting')"
+				@click="atStarport ? emit('close') : emit('act', 'finishOutfitting')"
 			>
-				{{ myTurn ? 'Done outfitting' : 'Waiting for your turn to outfit' }}
+				{{ atStarport ? 'Close outfitters' : myTurn ? 'Done outfitting' : 'Waiting for your turn to outfit' }}
 			</button>
 		</aside>
 	</div>

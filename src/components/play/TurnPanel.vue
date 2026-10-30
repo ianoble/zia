@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { OUTFITS_BY_ID } from '../../data/outfits';
-import { BUY_MAX, BUY_PRICE, checkMove, freeEngineUseSpaces, SELL_PRICE, sellableCubes, tradeHere, usableShields } from '../../logic/game';
+import {
+	atStarport,
+	BUY_MAX,
+	BUY_PRICE,
+	checkMove,
+	freeEngineUseSpaces,
+	repairCost,
+	SELL_PRICE,
+	sellableCubes,
+	tradeHere,
+	usableShields,
+	WEALTH_PRICE,
+} from '../../logic/game';
 import { ECONOMY_CUBES, type EconomyCube } from '../../logic/types';
 import { CUBE_FILL } from '../ship/shipMatTheme';
 import { edgeSymbolFacing, SLOT_NAMES, unexploredEdges } from '../../logic/board';
@@ -12,7 +24,7 @@ import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
 /** Active captain's controls: impulse, fire engines, then end turn (Status Phase: arm markers). */
 const props = defineProps<{ G: ZiaState; playerID: string; currentPlayer: string; nameOf: (seat: string) => string }>();
-const emit = defineEmits<{ act: [name: string, ...args: unknown[]] }>();
+const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; outfitters: [] }>();
 
 const myTurn = computed(() => props.playerID === props.currentPlayer);
 const ship = computed(() => props.G.players[props.playerID]?.ship ?? null);
@@ -59,6 +71,11 @@ const shieldChoices = computed(() =>
 			})
 		: [],
 );
+/** Starport Phase: dock at a planet, then use its services. */
+const atPort = computed(() => atStarport(props.G, props.playerID));
+const docked = computed(() => !!props.G.turn.starport);
+const can = (move: string) => checkMove(props.G, props.playerID, props.currentPlayer, move, []) === true;
+
 /** Trade at a planet's Buy / Sell space. */
 const trade = computed(() => tradeHere(props.G, props.playerID));
 const buyColors = computed<EconomyCube[]>(() => {
@@ -78,7 +95,9 @@ const pendingCargo = computed(() => props.G.players[props.playerID]?.pendingCarg
 const pairPending = computed(() => !!props.G.turn.explorationPairPending);
 const deckLeft = computed(() => props.G.sectorDeck?.length ?? 0);
 
-const maxArm = computed(() => (ship.value ? Math.min(MARKERS_PER_SHIP - ship.value.armedMarkers, ship.value.energy) : 0));
+const maxArm = computed(() =>
+	ship.value ? Math.min(MARKERS_PER_SHIP - ship.value.armedMarkers, atPort.value ? MARKERS_PER_SHIP : ship.value.energy) : 0,
+);
 const armCount = ref(0);
 watch(
 	() => [myTurn.value, maxArm.value] as const,
@@ -140,6 +159,42 @@ watch(
 		<div class="grid grid-cols-2 gap-2">
 			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'fame')">1 fame</button>
 			<button class="action justify-center" @click="emit('act', 'claimExplorationPair', 'credits')">2,000 credits</button>
+		</div>
+	</div>
+
+	<div v-else-if="ship && def && docked" class="space-y-3 rounded-lg border border-teal-800/70 bg-slate-900/70 p-3 text-sm">
+		<div>
+			<p class="font-semibold text-teal-200">Starport Phase</p>
+			<p class="text-xs text-slate-400">Docked: your actions are over. Use any services, then end your turn (arming is free here).</p>
+		</div>
+		<button class="action" :disabled="!can('rechargeEnergy')" @click="emit('act', 'rechargeEnergy')">
+			<span>Recharge energy</span><span class="text-teal-300">free</span>
+		</button>
+		<button class="action" :disabled="!can('repairDamage')" @click="emit('act', 'repairDamage')">
+			<span>Repair damage ({{ ship.damage.length }})</span><span class="text-amber-300">{{ repairCost(ship).toLocaleString('en-US') }} cR</span>
+		</button>
+		<button class="action" :disabled="!can('thawIce')" @click="emit('act', 'thawIce')">
+			<span>Thaw ice damage ({{ ship.iceDamage.length }})</span><span class="text-teal-300">free</span>
+		</button>
+		<button class="action" @click="emit('outfitters')">
+			<span>Outfitters</span><span class="text-slate-400">buy, sell, rearrange</span>
+		</button>
+		<button class="action" :disabled="!can('buyFame')" :title="can('buyFame') ? '' : 'Needs 5,000 credits, and never the winning point'" @click="emit('act', 'buyFame')">
+			<span>Throw some credits around</span><span class="text-amber-300">{{ WEALTH_PRICE.toLocaleString('en-US') }} cR → 1 fame</span>
+		</button>
+
+		<div class="space-y-2 border-t border-slate-800 pt-3">
+			<div class="flex items-center justify-between gap-2">
+				<span class="text-slate-300">Arm markers (free here)</span>
+				<div class="flex items-center gap-2">
+					<button class="step" :disabled="armCount <= 0" @click="armCount--">−</button>
+					<span class="w-4 text-center font-bold">{{ armCount }}</span>
+					<button class="step" :disabled="armCount >= MARKERS_PER_SHIP - ship.armedMarkers" @click="armCount++">+</button>
+				</div>
+			</div>
+			<button class="w-full rounded-lg bg-emerald-600 py-2 font-semibold hover:bg-emerald-500" @click="emit('act', 'endTurn', armCount)">
+				End turn
+			</button>
 		</div>
 	</div>
 
@@ -209,6 +264,13 @@ watch(
 			<p v-if="!(scanSides.length && deckLeft)" class="text-xs text-slate-500">
 				{{ deckLeft ? 'Move next to an unexplored edge (the outer rim of the map) to Scan or Blind Jump.' : 'Every sector has been explored.' }}
 			</p>
+		</div>
+
+		<div v-if="atPort" class="space-y-2 rounded-lg border border-teal-900/60 bg-teal-950/20 p-2">
+			<button class="action" @click="emit('act', 'enterStarport')">
+				<span>Dock at the starport</span><span class="text-teal-300">ends your actions</span>
+			</button>
+			<p class="text-xs text-slate-500">Starport Phase: recharge, repair, thaw, outfitters, buy fame. Arming is free at a starport.</p>
 		</div>
 
 		<div v-if="trade" class="space-y-2 rounded-lg border border-emerald-900/60 bg-emerald-950/20 p-2">

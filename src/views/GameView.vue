@@ -122,6 +122,12 @@ watch(mapCollapsed, (v) => localStorage.setItem(MAP_COLLAPSED_KEY, v ? '1' : '0'
 const me = computed(() => G.value?.players?.[props.playerID]);
 const myMissionLimit = computed(() => (me.value?.ship ? missionLimit(me.value.ship) : 1));
 const missionsToKeep = computed(() => Math.max(1, myMissionLimit.value - (me.value?.activeMissions?.length ?? 0)));
+/** Starport outfitters (opened from the Starport Phase panel). */
+const outfittersOpen = ref(false);
+const docked = computed(() => stage.value === 'play' && isMyTurn.value && !!G.value?.turn?.starport);
+watch(docked, (d) => {
+	if (!d) outfittersOpen.value = false;
+});
 const showMissionHand = computed(() => stage.value === 'play' && !!me.value?.ship);
 const HAND_COLLAPSED_KEY = 'zia:missionHandCollapsed';
 const handCollapsed = ref(localStorage.getItem(HAND_COLLAPSED_KEY) === '1');
@@ -232,6 +238,18 @@ onUnmounted(() => disconnect());
 						@act="act"
 					/>
 
+					<OutfitShop
+						v-else-if="stage === 'play' && docked && outfittersOpen"
+						mode="starport"
+						:G="G"
+						:player-i-d="playerID"
+						:current-player="currentPlayer"
+						:color="playerColor(playerID)"
+						:captain-name="nameOf(playerID)"
+						@act="act"
+						@close="outfittersOpen = false"
+					/>
+
 					<div v-else-if="stage === 'play'" class="space-y-3">
 						<div class="flex flex-wrap gap-2">
 							<button
@@ -296,7 +314,15 @@ onUnmounted(() => disconnect());
 						</ul>
 					</div>
 
-					<TurnPanel v-if="stage === 'play'" :G="G" :player-i-d="playerID" :current-player="currentPlayer" :name-of="nameOf" @act="act" />
+					<TurnPanel
+						v-if="stage === 'play'"
+						:G="G"
+						:player-i-d="playerID"
+						:current-player="currentPlayer"
+						:name-of="nameOf"
+						@act="act"
+						@outfitters="outfittersOpen = true"
+					/>
 
 					<div v-if="gameOver" class="rounded-lg border border-amber-800/50 bg-slate-900/90 p-4 text-center text-sm">
 						<span v-if="gameOver.winner === playerID" class="text-emerald-400">You win!</span>

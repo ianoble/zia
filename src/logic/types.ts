@@ -126,6 +126,8 @@ export interface TurnState {
 	 * draw 3 mission cards at the end of the turn (rulebook p12).
 	 */
 	missionDraws?: string[];
+	/** In the Starport Phase (docked at a planet): no more actions, only starport services. */
+	starport?: boolean;
 	/** Luck (a natural 20 on a d20) has paid out this turn; it pays at most once per turn. */
 	luckUsed?: boolean;
 	/** A move stopped at a border, waiting for the captain (see BorderCrossing). */
