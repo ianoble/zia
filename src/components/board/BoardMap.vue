@@ -188,6 +188,50 @@ const sectorLabels = computed(() =>
 /** Hover text for every hex: its sector's name, type and features. */
 const sectorTitles = computed(() => sectorLabels.value.map((s) => (s.info ? `${s.name} — ${s.info}` : s.name)));
 
+const CUBE_NAMES: Record<string, string> = { P: 'Plasma', S: 'Spice', H: 'Holo', T: 'Terra', C: 'Cyber', E: 'Ember', Any: 'any cube' };
+const SIDE_NAMES = ['lower-right', 'bottom', 'lower-left', 'upper-left', 'top', 'upper-right'];
+
+/** "Buy P" → "Buy Plasma" for the tile's trade features. */
+function tradeText(tileId: string, kind: 'Buy' | 'Sell'): string {
+	const f = SECTORS_BY_ID[tileId]?.features.find((x) => x.startsWith(`${kind} `));
+	return f ? `${kind} ${CUBE_NAMES[f.slice(kind.length + 1)] ?? f.slice(kind.length + 1)}` : kind;
+}
+
+/** What's on each space, with what happens when a ship enters (rulebook p10, p20), for its tooltip. */
+const hexTitles = computed(() => {
+	const tokens = new Set(props.explorationSpaces ?? []);
+	const entrances = planetEntrances(props.board);
+	const out = new Map<string, string>();
+	for (const h of hexes.value) {
+		const tileId = props.board.sectors[h.sectorIndex]?.tileId;
+		const lines: string[] = [];
+		const k = h.kinds;
+		if (k.includes('star')) lines.push('Star: impassable. A ship that flies in (e.g. a Blind Jump) is destroyed.');
+		if (k.includes('planet')) {
+			const side = h.planetSide === 'lawful' ? 'Lawful' : h.planetSide === 'outlaw' ? 'Outlaw' : 'Neutral';
+			lines.push(`${side} planet (starport). Crossing the shield, in or out, except by the entrance: d20 1–10 unblockable damage and you stay put (−1 movement), 11–17 through with +1,000 bounty, 18–20 through.`);
+			if (h.planetSide === 'lawful') lines.push("Outlaws can't come in by the entrance (they may leave by it).");
+			if (h.planetSide === 'outlaw') lines.push('Innocent ships using the entrance get +1,000 bounty.');
+			const door = [0, 1, 2, 3, 4, 5].find((d) => entrances.has(`${h.key}:${d}`));
+			if (door != null) lines.push(`Planetary entrance on this space's ${SIDE_NAMES[door]} side.`);
+		}
+		if (k.includes('asteroid')) lines.push('Asteroid: entering, d20 1–10 damage equal to the roll (shields can cut it), 11–20 safe.');
+		if (k.includes('debris')) lines.push('Debris field: entering, d20 1–3 the ship is destroyed, 4–20 safe.');
+		if (k.includes('nebula')) lines.push('Nebula: crossing in from outside, d20 1–10 lose that much energy (shields can cut it), 11–20 safe. Moving around inside is free.');
+		if (k.includes('gate')) lines.push('Gate (gate travel coming later).');
+		if (k.includes('buy')) lines.push(`${tradeText(tileId, 'Buy')} (trading coming later).`);
+		if (k.includes('sell')) lines.push(`${tradeText(tileId, 'Sell')} (trading coming later).`);
+		if (k.includes('harvest')) lines.push('Harvest space (coming later).');
+		if (k.includes('salvage')) lines.push('Salvage space (coming later).');
+		if (k.includes('mine')) lines.push('Mining space (coming later).');
+		if (k.includes('mission')) lines.push('Mission point (missions coming later).');
+		if (k.includes('spawn')) lines.push(`Spawn point ${h.spawnNumber ?? ''}`.trim() + '.');
+		if (k.includes('exploration')) lines.push(tokens.has(h.key) ? 'Exploration space: a face-down token, flipped by the first ship to fly onto it.' : 'Exploration space (its token has been taken).');
+		out.set(h.key, [sectorTitles.value[h.sectorIndex], ...lines].join('\n'));
+	}
+	return out;
+});
+
 /** Face-down exploration tokens, drawn on their hex. */
 const tokenViews = computed(() =>
 	(props.explorationSpaces ?? []).map((key) => ({ key, ...hexToPixel(parseHexKey(key), SIZE) })),
@@ -279,7 +323,7 @@ function onHexClick(key: string) {
 
 			<!-- Spaces -->
 			<g v-for="h in hexes" :key="h.key" :data-hex="h.key" class="hex" :class="{ reachable: reachable?.has(h.key) }" @click="onHexClick(h.key)">
-				<title>{{ sectorTitles[h.sectorIndex] }}</title>
+				<title>{{ hexTitles.get(h.key) }}</title>
 				<polygon
 					:points="h.points"
 					class="hex-shape"
