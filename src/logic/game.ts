@@ -201,6 +201,20 @@ function armMarkers(ship: ShipState, n: number) {
 
 const markersAvailableToArm = (ship: ShipState) => MARKERS_PER_SHIP - ship.armedMarkers;
 
+/**
+ * Roll a die for a captain. Luck (rulebook p6): a natural 20 on a d20 earns 1 fame, at
+ * most once per turn.
+ */
+export function rollDie(G: ZiaState, seat: string, random: RandomApi, sides: number): number {
+	const roll = random.Die(sides);
+	if (sides === 20 && roll === 20 && !G.turn.luckUsed) {
+		G.turn.luckUsed = true;
+		G.players[seat].fame++;
+		log(G, seat, 'rolled a natural 20: +1 fame for Luck');
+	}
+	return roll;
+}
+
 /** Put a face-down exploration token on each exploration space of a newly placed sector, while tokens last. */
 function placeExplorationTokens(G: ZiaState, sectorIndex: number) {
 	for (const h of boardHexes(G.board).values()) {
@@ -336,7 +350,7 @@ function resolveBorders(c: MoveCtx) {
 	const cross = G.turn.crossing!;
 	while (cross.borders.length) {
 		const kind = cross.borders[0];
-		const roll = random.D20();
+		const roll = rollDie(G, playerID, random, 20);
 		if (kind === 'shield') {
 			if (roll <= 10) {
 				log(G, playerID, `rolled ${roll} crossing the planetary shield: ${roll} unblockable damage, and the ship stays put (−1 movement)`);
@@ -468,7 +482,7 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 	const p = G.players[seat];
 	const ship = p.ship!;
-	const roll = random.D20();
+	const roll = rollDie(G, seat, random, 20);
 	const hex = respawnHex(G.board, roll, occupiedHexes(G, seat));
 	if (!hex) {
 		log(G, seat, `rolled ${roll} to respawn, but every spawn point is taken`);
@@ -485,10 +499,6 @@ function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 	ship.iceDamage = [];
 	const spawn = boardHexes(G.board).get(hex)?.spawnNumber;
 	log(G, seat, `rolled ${roll} and respawned at spawn point ${spawn}`);
-	if (roll === 20) {
-		p.fame++;
-		log(G, seat, 'rolled a natural 20: +1 fame for Luck');
-	}
 	// Embers: respawned ships take unblockable damage equal to their tier, placed by the captain.
 	takeDamage(G, seat, 'damage', shipDef(ship).tier, 'respawn damage filled the hold');
 }
@@ -720,7 +730,7 @@ const moves = {
 		o.usedSpaces.push(freeEngineUseSpaces(ship, uid)[0]);
 		ship.armedMarkers--;
 		const sides = DIE_SIDES[def.die!];
-		const roll = random.Die(sides);
+		const roll = rollDie(G, playerID, random, sides);
 		const { result, penalty, gts } = engineRollResult(ship, uid, roll, sides);
 		const lost = G.turn.movement;
 		G.turn.movement = result;
@@ -758,7 +768,7 @@ const moves = {
 		// Enviro-Shld on this shield: it rolls its maximum against board effects.
 		const shieldKeys = new Set(placedCells(o).map((x) => cellKey(x.x, x.y)));
 		const enviro = ship.outfits.some((m) => m.outfitId === 'enviro-shield' && placedCells(m).some((x) => shieldKeys.has(cellKey(x.x, x.y))));
-		const roll = enviro ? sides : random.Die(sides);
+		const roll = enviro ? sides : rollDie(G, playerID, random, sides);
 		const damaged = damagedCells(ship);
 		const penalty = placedCells(o).filter((x) => damaged.has(cellKey(x.x, x.y))).length;
 		const block = Math.max(1, roll - penalty);
