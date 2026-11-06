@@ -73,6 +73,8 @@ describe('Harvest', () => {
 		const c = findSeed('harvest', (r) => r >= 11);
 		expect(c.me().pendingCargo).toEqual(['holo']);
 		expect(c.G().turn.movement).toBe(0);
+		// Recorded for the dice dialog.
+		expect(c.G().rolls!.at(-1)).toMatchObject({ seat: c.seat, sides: 20, label: 'Harvest holo', outcome: 'good', detail: 'You get a holo cube' });
 		expect(c.me().position).toBe(c.space);
 	});
 

@@ -43,6 +43,7 @@ import {
 	type CubeColor,
 	type EconomyCube,
 	type ExtractionKind,
+	type RollOutcome,
 	type DamageKind,
 	type PlacedOutfit,
 	type Rotation,
@@ -217,18 +218,34 @@ function armMarkers(ship: ShipState, n: number) {
 
 const markersAvailableToArm = (ship: ShipState) => MARKERS_PER_SHIP - ship.armedMarkers;
 
+/** Dice rolls kept in G.rolls for the page to animate. */
+const MAX_ROLLS = 20;
+
 /**
- * Roll a die for a captain. Luck (rulebook p6): a natural 20 on a d20 earns 1 fame, at
- * most once per turn.
+ * Roll a die for a captain, recording it in G.rolls under `label` (settle it with
+ * settleRoll once the result is known). Luck (rulebook p6): a natural 20 on a d20 earns
+ * 1 fame, at most once per turn.
  */
-export function rollDie(G: ZiaState, seat: string, random: RandomApi, sides: number): number {
-	const roll = random.Die(sides);
-	if (sides === 20 && roll === 20 && !G.turn.luckUsed) {
+export function rollDie(G: ZiaState, seat: string, random: RandomApi, sides: number, label: string, automatic = false): number {
+	const roll = automatic ? sides : random.Die(sides);
+	let luck = false;
+	if (!automatic && sides === 20 && roll === 20 && !G.turn.luckUsed) {
 		G.turn.luckUsed = true;
 		G.players[seat].fame++;
+		luck = true;
 		log(G, seat, 'rolled a natural 20: +1 fame for Luck');
 	}
+	G.rollCount = (G.rollCount ?? 0) + 1;
+	G.rolls ??= [];
+	G.rolls.push({ id: G.rollCount, seat, sides, roll, label, outcome: 'neutral', detail: '', ...(luck ? { luck } : {}), ...(automatic ? { automatic } : {}) });
+	if (G.rolls.length > MAX_ROLLS) G.rolls.splice(0, G.rolls.length - MAX_ROLLS);
 	return roll;
+}
+
+/** Say how the latest roll turned out, for the dice dialog. */
+function settleRoll(G: ZiaState, outcome: RollOutcome, detail: string) {
+	const last = G.rolls?.at(-1);
+	if (last) Object.assign(last, { outcome, detail });
 }
 
 /** Put a face-down exploration token on each exploration space of a newly placed sector, while tokens last. */
@@ -435,9 +452,10 @@ function resolveBorders(c: MoveCtx) {
 	const cross = G.turn.crossing!;
 	while (cross.borders.length) {
 		const kind = cross.borders[0];
-		const roll = rollDie(G, playerID, random, 20);
+		const roll = rollDie(G, playerID, random, 20, `Crossing the ${BORDER_NAME[kind]}${kind === 'shield' ? '' : ' border'}`);
 		if (kind === 'shield') {
 			if (roll <= 10) {
+				settleRoll(G, 'bad', `${roll} unblockable damage, and you stay put (−1 movement)`);
 				log(G, playerID, `rolled ${roll} crossing the planetary shield: ${roll} unblockable damage, and the ship stays put (−1 movement)`);
 				G.turn.crossing = null;
 				G.turn.movement = Math.max(0, G.turn.movement - 1);
@@ -446,20 +464,27 @@ function resolveBorders(c: MoveCtx) {
 			}
 			if (roll <= 17) {
 				p.bounty += 1000;
+				settleRoll(G, 'mixed', 'Through, but detected: +1,000 bounty');
 				log(G, playerID, `rolled ${roll} crossing the planetary shield: through, but detected (+1,000 bounty)`);
-			} else log(G, playerID, `rolled ${roll} crossing the planetary shield: through undetected`);
+			} else {
+				settleRoll(G, 'good', 'Through undetected');
+				log(G, playerID, `rolled ${roll} crossing the planetary shield: through undetected`);
+			}
 		} else if (kind === 'debris') {
 			if (roll <= 3) {
+				settleRoll(G, 'bad', 'Your ship is destroyed');
 				log(G, playerID, `rolled ${roll} entering the debris field`);
 				G.turn.crossing = null;
 				destroyShip(G, playerID, 'smashed in a debris field');
 				events.endTurn();
 				return;
 			}
+			settleRoll(G, 'good', 'Safely through');
 			log(G, playerID, `rolled ${roll} entering the debris field: safely through`);
 		} else if (roll <= 10) {
 			// Asteroid damage or nebula energy loss; shields may cut it down first.
 			const what = kind === 'asteroid' ? 'damage' : 'energy loss';
+			settleRoll(G, 'bad', `${roll} ${what}${usableShields(p.ship!).length ? ' (you can fire a shield)' : ''}`);
 			log(G, playerID, `rolled ${roll} entering the ${BORDER_NAME[kind]}: ${roll} ${what}`);
 			cross.roll = roll;
 			cross.amount = roll;
@@ -469,7 +494,10 @@ function resolveBorders(c: MoveCtx) {
 			}
 			if (!takeBorderEffect(c)) return;
 			continue;
-		} else log(G, playerID, `rolled ${roll} entering the ${BORDER_NAME[kind]}: safely through`);
+		} else {
+			settleRoll(G, 'good', 'Safely through');
+			log(G, playerID, `rolled ${roll} entering the ${BORDER_NAME[kind]}: safely through`);
+		}
 		cross.borders.shift();
 	}
 	finishCrossing(c);
@@ -709,9 +737,10 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 	const p = G.players[seat];
 	const ship = p.ship!;
-	const roll = rollDie(G, seat, random, 20);
+	const roll = rollDie(G, seat, random, 20, 'Respawn');
 	const hex = respawnHex(G.board, roll, occupiedHexes(G, seat));
 	if (!hex) {
+		settleRoll(G, 'bad', 'Every spawn point is taken');
 		log(G, seat, `rolled ${roll} to respawn, but every spawn point is taken`);
 		return;
 	}
@@ -725,6 +754,7 @@ function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 	ship.damage = [];
 	ship.iceDamage = [];
 	const spawn = boardHexes(G.board).get(hex)?.spawnNumber;
+	settleRoll(G, 'neutral', `Respawned at spawn point ${spawn}, then ${shipDef(ship).tier} damage`);
 	log(G, seat, `rolled ${roll} and respawned at spawn point ${spawn}`);
 	// Embers: respawned ships take unblockable damage equal to their tier, placed by the captain.
 	takeDamage(G, seat, 'damage', shipDef(ship).tier, 'respawn damage filled the hold');
@@ -1099,11 +1129,12 @@ const moves = {
 		o.usedSpaces.push(freeEngineUseSpaces(ship, uid)[0]);
 		ship.armedMarkers--;
 		const sides = DIE_SIDES[def.die!];
-		const roll = rollDie(G, playerID, random, sides);
+		const roll = rollDie(G, playerID, random, sides, `Fire ${def.name}`);
 		const { result, penalty, gts } = engineRollResult(ship, uid, roll, sides);
 		const lost = G.turn.movement;
 		G.turn.movement = result;
 		const mods = `${penalty ? ` −${penalty} damage` : ''}${gts ? ` +${2 * gts} GTS` : ''}`;
+		settleRoll(G, roll === 1 ? 'bad' : roll === sides ? 'good' : 'neutral', `${result} movement${mods ? ` (${mods.trim()})` : ''}`);
 		log(G, playerID, `fired the ${def.name}: rolled ${roll}${mods} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 
@@ -1140,11 +1171,12 @@ const moves = {
 		// Enviro-Shld on this shield: it rolls its maximum against board effects.
 		const shieldKeys = new Set(placedCells(o).map((x) => cellKey(x.x, x.y)));
 		const enviro = ship.outfits.some((m) => m.outfitId === 'enviro-shield' && placedCells(m).some((x) => shieldKeys.has(cellKey(x.x, x.y))));
-		const roll = enviro ? sides : rollDie(G, playerID, random, sides);
+		const roll = rollDie(G, playerID, random, sides, `Fire ${def.name}${enviro ? ' (Enviro-Shld)' : ''}`, enviro);
 		const damaged = damagedCells(ship);
 		const penalty = placedCells(o).filter((x) => damaged.has(cellKey(x.x, x.y))).length;
 		const block = Math.max(1, roll - penalty);
 		cross.amount = Math.max(0, (cross.amount ?? 0) - block);
+		settleRoll(G, cross.amount === 0 ? 'good' : 'mixed', `Blocked ${block}${penalty ? ` (−${penalty} damage on the shield)` : ''}: ${cross.amount === 0 ? 'nothing gets through' : `${cross.amount} still to take`}`);
 		log(G, playerID, `fired the ${def.name}: ${enviro ? `${sides} (Enviro-Shld)` : `rolled ${roll}`}${penalty ? ` −${penalty} damage` : ''}, blocking ${block}; ${cross.amount} left`);
 		if (cross.amount === 0 || !usableShields(ship).length) takeShieldedEffect(c);
 	}),
@@ -1163,21 +1195,24 @@ const moves = {
 		const p = G.players[playerID];
 		const { kind, color } = extractionHere(G, playerID)!;
 		endMovement(G, playerID);
-		const roll = rollDie(G, playerID, random, 20);
+		const roll = rollDie(G, playerID, random, 20, `${EXTRACT_VERB[kind]} ${color}`);
 		const verb = { mine: 'mining', harvest: 'harvesting', salvage: 'salvaging' }[kind];
 		if (kind === 'salvage' && roll <= 3) {
+			settleRoll(G, 'bad', 'Something in the wreckage detonated: your ship is destroyed');
 			log(G, playerID, `rolled ${roll} salvaging: something in the wreckage detonated`);
 			destroyShip(G, playerID, 'blown up while salvaging');
 			events.endTurn();
 			return;
 		}
 		if (kind !== 'salvage' && roll <= 10) {
+			settleRoll(G, 'bad', `${roll} ${kind === 'mine' ? 'damage' : 'energy loss'}${usableShields(p.ship!).length ? ' (you can fire a shield)' : ''}`);
 			log(G, playerID, `rolled ${roll} ${verb}: ${roll} ${kind === 'mine' ? 'damage' : 'energy loss'}`);
 			G.turn.hazard = { kind, roll, amount: roll };
 			if (!usableShields(p.ship!).length) takeHazard(c);
 			return;
 		}
 		gainCargo(G, playerID, color);
+		settleRoll(G, 'good', `You get a ${color} cube`);
 		log(G, playerID, `rolled ${roll} ${verb}: got a ${color} cube`);
 	}),
 
@@ -1385,13 +1420,15 @@ const moves = {
 		G.turn.movement -= 1;
 		const fame = (G.gateFameTaken ??= {});
 		if (onTigrisGate(G.board, p.position!)) {
-			const roll = rollDie(G, playerID, random, 20);
+			const roll = rollDie(G, playerID, random, 20, 'The Tigris gate');
 			const dest = respawnHex(G.board, roll, occupiedHexes(G, playerID));
 			if (!dest) {
+				settleRoll(G, 'bad', 'Every spawn point is taken: the gate goes nowhere');
 				log(G, playerID, `used the Tigris gate and rolled ${roll}, but every spawn point is taken`);
 				return;
 			}
 			p.position = dest;
+			settleRoll(G, 'neutral', `You come out at spawn point ${boardHexes(G.board).get(dest)?.spawnNumber}`);
 			log(G, playerID, `used the Tigris gate: rolled ${roll}, came out at spawn point ${boardHexes(G.board).get(dest)?.spawnNumber}`);
 			if (!fame.tigris) {
 				fame.tigris = true;

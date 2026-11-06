@@ -12,5 +12,6 @@ export const router = createRouter({
     { path: '/dev/ship-mat', component: () => import('./views/dev/ShipMatPreview.vue') },
     { path: '/dev/board', component: () => import('./views/dev/BoardPreview.vue') },
     { path: '/dev/missions', component: () => import('./views/dev/MissionsPreview.vue') },
+    { path: '/dev/dice', component: () => import('./views/dev/DicePreview.vue') },
   ],
 });

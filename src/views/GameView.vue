@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue';
 import { useGame, useTurnNotifications, loadSession } from '@engine/client';
 import { gameDef, gateDestinations, reachableHexes, routeBorders, unexploredEdges } from '../logic/index';
 import { entranceChoice, shipsForSale, type EntranceChoice } from '../logic/game';
-import type { PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
+import type { DiceRoll, PlayerColor, ZiaGameOver, ZiaState } from '../logic/types';
 import { SHIPS_BY_ID } from '../data/ships';
 import { cargoTargets, damageTargets, missionLimit } from '../logic/ship';
 import MissionHand from '../components/missions/MissionHand.vue';
@@ -17,6 +17,7 @@ import ShipPicker from '../components/setup/ShipPicker.vue';
 import OutfitShop from '../components/setup/OutfitShop.vue';
 import TurnPanel from '../components/play/TurnPanel.vue';
 import PromptDialog from '../components/play/PromptDialog.vue';
+import DiceRollDialog from '../components/play/DiceRollDialog.vue';
 import EconomyBoard from '../components/play/EconomyBoard.vue';
 import ZiaLog from '../components/ZiaLog.vue';
 
@@ -216,6 +217,28 @@ const orderedSeats = computed(() => {
 });
 
 const credits = (n: number) => n.toLocaleString('en-US');
+
+/**
+ * My dice rolls play one at a time in the dice dialog. Rolls made before the page loaded
+ * aren't replayed.
+ */
+const rollQueue = ref<DiceRoll[]>([]);
+let lastRollSeen: number | null = null;
+watch(
+	() => [loaded.value, G.value?.rollCount ?? 0] as const,
+	([ready, count]) => {
+		if (!ready) return;
+		if (lastRollSeen == null) {
+			lastRollSeen = count;
+			return;
+		}
+		const seen = lastRollSeen;
+		const fresh = (G.value?.rolls ?? []).filter((r) => r.id > seen && r.seat === props.playerID);
+		lastRollSeen = count;
+		rollQueue.value.push(...fresh);
+	},
+	{ immediate: true },
+);
 
 onMounted(() => {
 	const session = loadSession(gameDef.id, props.matchID);
@@ -453,6 +476,7 @@ onUnmounted(() => disconnect());
 					<button class="secondary" @click="exitPrompt = null">Cancel</button>
 				</template>
 			</PromptDialog>
+			<DiceRollDialog v-if="rollQueue.length" :key="rollQueue[0].id" :roll="rollQueue[0]" @done="rollQueue.shift()" />
 			<MissionChoice
 				v-if="isMyTurn && me?.drawnMissions?.length"
 				:cards="me.drawnMissions"

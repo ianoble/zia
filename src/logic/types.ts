@@ -148,6 +148,26 @@ export interface TurnState {
 	hazard?: ExtractionHazard | null;
 }
 
+/** How a roll turned out for the captain who rolled it. */
+export type RollOutcome = 'good' | 'mixed' | 'bad' | 'neutral';
+
+/** A captain's dice roll, kept so the page can show it rolling (only the last few are kept). */
+export interface DiceRoll {
+	id: number;
+	seat: string;
+	sides: number;
+	roll: number;
+	/** What the roll was for, e.g. "Crossing the asteroid border". */
+	label: string;
+	outcome: RollOutcome;
+	/** What happened, e.g. "7 damage". */
+	detail: string;
+	/** A natural 20 that earned 1 fame for Luck. */
+	luck?: boolean;
+	/** Not rolled: the die was set to its maximum (Enviro-Shld). */
+	automatic?: boolean;
+}
+
 /** Mine, Harvest and Salvage spaces (rulebook p16). */
 export type ExtractionKind = 'mine' | 'harvest' | 'salvage';
 
@@ -214,6 +234,10 @@ export interface ZiaState extends BaseGameState {
 	supply: Record<string, number>;
 	turn: TurnState;
 	log: LogLine[];
+	/** Recent captain dice rolls, newest last (see DiceRoll), so the page can animate them. */
+	rolls?: DiceRoll[];
+	/** Rolls made so far this game: each roll's `id`. */
+	rollCount?: number;
 }
 
 export interface ZiaGameOver {
