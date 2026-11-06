@@ -1134,7 +1134,7 @@ const moves = {
 		const lost = G.turn.movement;
 		G.turn.movement = result;
 		const mods = `${penalty ? ` −${penalty} damage` : ''}${gts ? ` +${2 * gts} GTS` : ''}`;
-		settleRoll(G, roll === 1 ? 'bad' : roll === sides ? 'good' : 'neutral', `${result} movement${mods ? ` (${mods.trim()})` : ''}`);
+		settleRoll(G, 'neutral', `${result} movement${mods ? ` (${mods.trim()})` : ''}`);
 		log(G, playerID, `fired the ${def.name}: rolled ${roll}${mods} → ${result} movement${lost ? ` (${lost} unspent lost)` : ''}`);
 	}),
 

@@ -13,7 +13,7 @@ const SAMPLES: Omit<DiceRoll, 'id' | 'seat'>[] = [
 	{ sides: 20, roll: 20, label: 'Crossing the nebula border', outcome: 'good', detail: 'Safely through', luck: true },
 	{ sides: 8, roll: 6, label: 'Fire d8 Engine', outcome: 'neutral', detail: '6 movement' },
 	{ sides: 6, roll: 4, label: 'Fire d6 Shield', outcome: 'mixed', detail: 'Blocked 4: 3 still to take' },
-	{ sides: 12, roll: 12, label: 'Fire d12 Engine', outcome: 'good', detail: '12 movement' },
+	{ sides: 12, roll: 12, label: 'Fire d12 Engine', outcome: 'neutral', detail: '12 movement' },
 ];
 const queue = ref<DiceRoll[]>([]);
 const play = (s: (typeof SAMPLES)[number]) => queue.value.push({ ...s, id: nextId++, seat: '0' });
