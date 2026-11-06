@@ -1,0 +1,3 @@
+{
+  "installCommand": "rm -rf noble-bg-engine && git clone --depth 1 https://github.com/ianoble/noble-bg-engine.git noble-bg-engine && npm install"
+}
