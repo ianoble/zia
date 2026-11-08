@@ -59,8 +59,12 @@ const statusMessage = computed(() => {
 			return isMyTurn.value ? 'Your pick: choose a Tier I ship and its ability below.' : `${who} is choosing a ship.`;
 		case 'outfit':
 			return isMyTurn.value ? 'Buy outfits and place them in your hold, then press “Done outfitting”.' : `${who} is buying outfits.`;
-		default:
+		default: {
+			const combat = G.value?.combat;
+			if (combat?.defender === props.playerID) return `${nameOf(combat.attacker)} is attacking you!`;
+			if (combat) return `${nameOf(combat.attacker)} is attacking ${nameOf(combat.defender)}.`;
 			return isMyTurn.value ? 'Your turn.' : `${who}'s turn.`;
+		}
 	}
 });
 
@@ -233,7 +237,10 @@ watch(
 			return;
 		}
 		const seen = lastRollSeen;
-		const fresh = (G.value?.rolls ?? []).filter((r) => r.id > seen && r.seat === props.playerID);
+		// My rolls, and the other ship's dice in a fight (labelled with its captain, never my good or bad luck).
+		const fresh = (G.value?.rolls ?? [])
+			.filter((r) => r.id > seen && (r.seat === props.playerID || r.viewers?.includes(props.playerID)))
+			.map((r) => (r.seat === props.playerID ? r : { ...r, label: `${nameOf(r.seat)} · ${r.label}`, outcome: 'neutral' as const }));
 		lastRollSeen = count;
 		rollQueue.value.push(...fresh);
 	},
@@ -372,7 +379,7 @@ onUnmounted(() => disconnect());
 							:color="playerColor(viewedSeat)"
 							:bounty="G.players[viewedSeat].bounty"
 							:captain-name="nameOf(viewedSeat)"
-							:can-impulse="viewedSeat === playerID && isMyTurn && viewedShip.impulseReady"
+							:can-impulse="viewedSeat === playerID && isMyTurn && !G.combat && viewedShip.impulseReady"
 							:interactive="!!holdTargetCells"
 							:targets="holdTargetCells"
 							:target-kind="holdPlacement ?? undefined"
@@ -422,6 +429,7 @@ onUnmounted(() => disconnect());
 						:player-i-d="playerID"
 						:current-player="currentPlayer"
 						:name-of="nameOf"
+						:color-of="colorOf"
 						@act="act"
 						@outfitters="outfittersOpen = true"
 						@shipyard="shipyardOpen = true"
@@ -444,7 +452,7 @@ onUnmounted(() => disconnect());
 				v-model:collapsed="handCollapsed"
 				:missions="me?.activeMissions ?? []"
 				:limit="myMissionLimit"
-				:can-discard="isMyTurn && !me?.drawnMissions?.length"
+				:can-discard="isMyTurn && !G.combat && !me?.drawnMissions?.length"
 				@discard="(id) => act('discardMission', id)"
 			/>
 			<PromptDialog v-if="exitPrompt?.step === 'how'" title="Planetary shield ahead" dismissible @close="exitPrompt = null">

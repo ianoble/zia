@@ -21,12 +21,14 @@ import { CUBE_FILL } from '../ship/shipMatTheme';
 import { boardHexes, edgeSymbolFacing, gateDestinations, onTigrisGate, SLOT_NAMES, unexploredEdges } from '../../logic/board';
 import EdgeSymbolIcon from '../board/EdgeSymbolIcon.vue';
 import PromptDialog from './PromptDialog.vue';
+import CombatPanel from './CombatPanel.vue';
+import AttackOptions from './AttackOptions.vue';
 import { explorationTokenLabel } from '../../data/exploration';
 import { engineRollResult, shipDef } from '../../logic/ship';
 import { MARKERS_PER_SHIP, type ZiaState } from '../../logic/types';
 
 /** Active captain's controls: impulse, fire engines, then end turn (Status Phase: arm markers). */
-const props = defineProps<{ G: ZiaState; playerID: string; currentPlayer: string; nameOf: (seat: string) => string }>();
+const props = defineProps<{ G: ZiaState; playerID: string; currentPlayer: string; nameOf: (seat: string) => string; colorOf: (seat: string) => string }>();
 const emit = defineEmits<{ act: [name: string, ...args: unknown[]]; outfitters: []; shipyard: [] }>();
 
 const myTurn = computed(() => props.playerID === props.currentPlayer);
@@ -132,7 +134,9 @@ watch(
 </script>
 
 <template>
-	<div v-if="!myTurn" class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-300">
+	<CombatPanel v-if="G.combat" :G="G" :player-i-d="playerID" :name-of="nameOf" @act="(...a) => emit('act', ...a)" />
+
+	<div v-else-if="!myTurn" class="rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-sm text-slate-300">
 		Waiting for <strong>{{ nameOf(currentPlayer) }}</strong> to take their turn.
 	</div>
 
@@ -289,6 +293,8 @@ watch(
 				Standard action: uses an armed marker ({{ ship.armedMarkers }} left). Unspent movement is lost first.
 			</p>
 		</div>
+
+		<AttackOptions :G="G" :player-i-d="playerID" :name-of="nameOf" :color-of="colorOf" @act="(...a) => emit('act', ...a)" />
 
 		<div class="space-y-2">
 			<div class="flex items-center justify-between">

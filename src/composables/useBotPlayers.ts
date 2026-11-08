@@ -3,6 +3,7 @@ import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { gameDef } from '../logic/index';
 import { botDecision } from '../logic/bot';
+import { actingSeat } from '../logic/game';
 import type { ZiaState } from '../logic/types';
 import { SERVER_URL } from '../config';
 
@@ -64,13 +65,13 @@ export function useBotPlayers(matchID: Ref<string>, humanPlayerID: Ref<string>) 
 
 			const unsubscribe = client.subscribe((state) => {
 				const s = state as BotState;
-				if (!s?.G?.players || s.ctx.currentPlayer !== seat || timer) return;
+				if (!s?.G?.players || actingSeat(s.G, s.ctx.currentPlayer) !== seat || timer) return;
 				timer = setTimeout(act, BOT_DELAY_MS);
 			});
 			// Safety net: re-check periodically in case an update was missed.
 			const watchdog = setInterval(() => {
 				const s = client.getState() as BotState;
-				if (!timer && s?.ctx.currentPlayer === seat && s._stateID !== actedOn) timer = setTimeout(act, BOT_DELAY_MS);
+				if (!timer && s?.G?.players && actingSeat(s.G, s.ctx.currentPlayer) === seat && s._stateID !== actedOn) timer = setTimeout(act, BOT_DELAY_MS);
 			}, 2000);
 
 			client.start();

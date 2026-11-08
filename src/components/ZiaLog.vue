@@ -5,6 +5,11 @@ import type { LogLine } from '../logic/types';
 /** Readable game log (names and colours resolved by the parent). */
 const props = defineProps<{ lines: LogLine[]; nameOf: (seat: string) => string; colorOf: (seat: string) => string }>();
 
+/** Line text split into plain parts and `{@seat}` mentions of other captains. */
+function parts(text: string): { text?: string; seat?: string }[] {
+	return text.split(/(\{@[^}]+\})/).filter(Boolean).map((t) => (t.startsWith('{@') ? { seat: t.slice(2, -1) } : { text: t }));
+}
+
 const el = ref<HTMLElement | null>(null);
 watch(
 	() => props.lines.length,
@@ -21,8 +26,8 @@ watch(
 		<h3 class="border-b border-slate-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Log</h3>
 		<ol ref="el" class="max-h-64 space-y-1 overflow-y-auto px-3 py-2 text-sm">
 			<li v-for="(l, i) in lines" :key="i" :class="l.seat == null ? 'italic text-slate-400' : 'text-slate-200'">
-				<strong v-if="l.seat != null" :style="{ color: colorOf(l.seat) }">{{ nameOf(l.seat) }}</strong>
-				{{ l.text }}
+				<strong v-if="l.seat != null" :style="{ color: colorOf(l.seat) }">{{ nameOf(l.seat) }}</strong>{{ ' ' }}
+				<template v-for="(part, j) in parts(l.text)" :key="j"><strong v-if="part.seat != null" :style="{ color: colorOf(part.seat) }">{{ nameOf(part.seat) }}</strong><template v-else>{{ part.text }}</template></template>
 			</li>
 		</ol>
 	</div>

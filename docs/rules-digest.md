@@ -165,6 +165,7 @@ All of these roll a d20.
 4. **Roll:** the attacker rolls, then the defender.
 5. **Damage** = attack − defence. The defender places that many damage markers in their own hold.
 6. **Re-arm:** the defender may re-arm shield markers at 1 energy each.
+- **Implemented (2026-11-07):** Attack (standard action, `attack(target, [{uid, count}])`) against captains' ships with blasters and missiles, one armed marker per die, any mix of weapons that reach the target, repeatable while markers last. While `G.combat` is set the defender is the only active player (boardgame.io stage `defend`; `actingSeat` in game.ts): they declare shields (`defend`, none is fine; skipped when no shield can fire), both sides roll (each die −1 per damage on its outfit, min 1), the defender places the damage, then re-arms shield markers for 1 energy each (`rearmShields`); the rest go to Disarmed. Both captains see each other's dice. Bot defenders raise every shield, place damage in the first free space and re-arm all they can afford. A defender destroyed in combat leaves the attacker's turn alone. Not yet: kill rewards, Piercer, ramming, ship abilities, NPCs, bots attacking.
 
 ## Damage and destruction (p14–15)
 - **Placement:** the damaged player places each damage marker on any hold space.

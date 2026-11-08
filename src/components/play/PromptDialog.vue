@@ -6,7 +6,7 @@ import { onMounted, onUnmounted } from 'vue';
  * default slot and the answers in the `actions` slot. With `dismissible`, Escape or a click
  * on the backdrop emits `close` (for prompts that can be cancelled).
  */
-const props = withDefaults(defineProps<{ title: string; tone?: 'sky' | 'amber' | 'fuchsia'; dismissible?: boolean }>(), {
+const props = withDefaults(defineProps<{ title: string; tone?: 'sky' | 'amber' | 'fuchsia' | 'red'; dismissible?: boolean }>(), {
 	tone: 'sky',
 	dismissible: false,
 });
@@ -16,6 +16,7 @@ const TONES = {
 	sky: { border: 'border-sky-700/70', title: 'text-sky-200' },
 	amber: { border: 'border-amber-600/70', title: 'text-amber-200' },
 	fuchsia: { border: 'border-fuchsia-700/70', title: 'text-fuchsia-200' },
+	red: { border: 'border-red-700/70', title: 'text-red-200' },
 } as const;
 
 function onKey(e: KeyboardEvent) {

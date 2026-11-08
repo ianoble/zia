@@ -5,7 +5,7 @@
 import { IN_SCOPE_SHIPS } from '../data/ships';
 import { OUTFITS_BY_ID } from '../data/outfits';
 import { reachableHexes } from './board';
-import { checkMove } from './game';
+import { actingSeat, checkMove, rearmLimit, shieldOptions } from './game';
 import { autoPlace } from './holdGeometry';
 import { cargoTargets, damageTargets, shipDef } from './ship';
 import { MARKERS_PER_SHIP, type ZiaState } from './types';
@@ -19,9 +19,24 @@ export interface BotMove {
 const BOT_LOADOUT = ['engine-d6', 'shield-d6', 'blaster-d6', 'missile-d8'];
 
 export function botDecision(G: ZiaState, seat: string, currentPlayer: string, rand: () => number = Math.random): BotMove | null {
-	if (seat !== currentPlayer) return null;
+	if (seat !== actingSeat(G, currentPlayer)) return null;
 	const p = G.players[seat];
 	if (!p) return null;
+
+	// Under attack: raise every shield it can, place the damage, re-arm what it can afford.
+	if (G.combat && p.ship) {
+		if (G.combat.stage === 'defend') {
+			let markers = p.ship.armedMarkers;
+			const shields = shieldOptions(p.ship).flatMap((s) => {
+				const count = Math.min(s.free, markers);
+				markers -= count;
+				return count ? [{ uid: s.uid, count }] : [];
+			});
+			return { move: 'defend', args: [shields] };
+		}
+		if (G.combat.stage === 'damage') return { move: 'placeDamage', args: [damageTargets(p.ship)[0]] };
+		return { move: 'rearmShields', args: [rearmLimit(G)] };
+	}
 	const ok = (m: BotMove) => checkMove(G, seat, currentPlayer, m.move, m.args) === true;
 
 	if (G.stage === 'pickShip') {

@@ -34,12 +34,14 @@ import {
 	unexploredEdges,
 } from './board';
 import { canPlaceOutfit, cellKey, placedCells } from './holdGeometry';
+import { lineOfSight, rangeBetween } from './sight';
 import { applyDamage, cargoTargets, createShipState, damagedCells, damageTargets, engineRollResult, maxDamage, missionLimit, shipDef, totalDamage } from './ship';
 import {
 	ECONOMY_CUBES,
 	ECONOMY_MAX,
 	MARKERS_PER_SHIP,
 	PLAYER_COLORS,
+	type CombatOutfit,
 	type CubeColor,
 	type EconomyCube,
 	type ExtractionKind,
@@ -714,6 +716,8 @@ function exploreSector(G: ZiaState, random: RandomApi, sectorIndex: number, slot
  */
 function destroyShip(G: ZiaState, seat: string, reason: string) {
 	const p = G.players[seat];
+	// A defender shot down on someone else's turn leaves that turn alone.
+	const ownTurn = G.combat?.defender !== seat;
 	p.position = null;
 	p.bounty = 0;
 	p.pendingDamage = [];
@@ -723,8 +727,10 @@ function destroyShip(G: ZiaState, seat: string, reason: string) {
 	p.activeMissions = [];
 	p.drawnMissions = [];
 	if (p.ship) p.ship.cargo = [];
-	G.turn.movement = 0;
-	G.turn.missionDraws = [];
+	if (ownTurn) {
+		G.turn.movement = 0;
+		G.turn.missionDraws = [];
+	}
 	log(G, seat, `was destroyed: ${reason}`);
 }
 
@@ -761,13 +767,223 @@ function respawnShip(G: ZiaState, seat: string, random: RandomApi) {
 }
 
 // ---------------------------------------------------------------------------
+// Combat (rulebook p13-14)
+// ---------------------------------------------------------------------------
+
+/** Attack range by weapon: blasters 1, missiles 2-6 (rulebook p26). */
+export const WEAPON_RANGE: Record<'blaster' | 'missile', [number, number]> = { blaster: [1, 1], missile: [2, 6] };
+
+/** Who acts now: the defender while an attack waits on them, otherwise the captain whose turn it is. */
+export function actingSeat(G: ZiaState, currentPlayer: string): string {
+	return G.combat ? G.combat.defender : currentPlayer;
+}
+
+/** An outfit that can fire now and how many markers it can take (free, undamaged use spaces). */
+export interface FireOption {
+	uid: string;
+	free: number;
+}
+
+/** Markers declared on outfits for an attack or defence: [{ uid, count }]. */
+export type Declared = { uid: string; count: number }[];
+
+/** Blasters and missiles that could fire at a ship `range` spaces away. */
+export function weaponsFor(ship: ShipState, range: number): FireOption[] {
+	return ship.outfits.flatMap((o) => {
+		const type = OUTFITS_BY_ID[o.outfitId].type;
+		if (type !== 'blaster' && type !== 'missile') return [];
+		const [min, max] = WEAPON_RANGE[type];
+		const free = range >= min && range <= max ? freeUseSpaces(ship, o.uid, type).length : 0;
+		return free ? [{ uid: o.uid, free }] : [];
+	});
+}
+
+/** Shields that could fire now, with how many markers each can take. */
+export function shieldOptions(ship: ShipState): FireOption[] {
+	return ship.outfits.flatMap((o) => {
+		const free = freeUseSpaces(ship, o.uid, 'shield').length;
+		return free ? [{ uid: o.uid, free }] : [];
+	});
+}
+
+export interface AttackTarget {
+	seat: string;
+	range: number;
+	weapons: FireOption[];
+}
+
+/** Captains' ships `seat` can attack now: in line of sight, with a weapon in range that can fire. */
+export function attackTargets(G: ZiaState, seat: string): AttackTarget[] {
+	const p = G.players[seat];
+	if (!p?.ship || !p.position || p.ship.armedMarkers <= 0) return [];
+	const hexes = boardHexes(G.board);
+	return Object.values(G.players).flatMap((o) => {
+		if (o.id === seat || !o.ship || !o.position) return [];
+		const range = rangeBetween(p.position!, o.position);
+		const weapons = weaponsFor(p.ship!, range);
+		if (!weapons.length || !lineOfSight(G.board, p.position!, o.position, hexes)) return [];
+		return [{ seat: o.id, range, weapons }];
+	});
+}
+
+/** Check declared markers against what can fire: known outfits, room on each, enough armed markers. */
+function checkDeclared(list: unknown, options: FireOption[], armed: number, what: 'weapon' | 'shield'): true | string {
+	if (!Array.isArray(list)) return `Choose ${what}s to fire`;
+	let total = 0;
+	const seen = new Set<string>();
+	for (const d of list as Declared) {
+		if (!d || typeof d.uid !== 'string' || !Number.isInteger(d.count) || d.count < 1 || seen.has(d.uid)) return `Bad ${what} choice`;
+		seen.add(d.uid);
+		const opt = options.find((o) => o.uid === d.uid);
+		if (!opt) return what === 'weapon' ? "That weapon can't reach the target" : "That shield can't fire";
+		if (d.count > opt.free) return `Not enough free use spaces on that ${what}`;
+		total += d.count;
+	}
+	return total > armed ? 'Not enough armed markers' : true;
+}
+
+/** Put armed markers on the declared outfits' free use spaces. */
+function spendMarkers(ship: ShipState, list: Declared): CombatOutfit[] {
+	return list.map((d) => {
+		const o = ship.outfits.find((x) => x.uid === d.uid)!;
+		const spaces = freeUseSpaces(ship, d.uid, OUTFITS_BY_ID[o.outfitId].type).slice(0, d.count);
+		o.usedSpaces.push(...spaces);
+		ship.armedMarkers -= spaces.length;
+		return { uid: d.uid, spaces };
+	});
+}
+
+/** "2× d6 Blaster and 1× d8 Missile" */
+function describeOutfits(ship: ShipState, used: CombatOutfit[]): string {
+	return used.map((u) => `${u.spaces.length}× ${OUTFITS_BY_ID[ship.outfits.find((o) => o.uid === u.uid)!.outfitId].name}`).join(' and ');
+}
+
+/** Damage on an outfit's sections: −1 to each of its rolls (rulebook p14). */
+function outfitPenalty(ship: ShipState, o: PlacedOutfit): number {
+	const damaged = damagedCells(ship);
+	return placedCells(o).filter((c) => damaged.has(cellKey(c.x, c.y))).length;
+}
+
+/** Roll one die per marker on the outfits, shown to `viewer` too. Returns the total. */
+function rollOutfits(G: ZiaState, seat: string, random: RandomApi, used: CombatOutfit[], side: 'Attack' | 'Defence', viewer: string): number {
+	const ship = G.players[seat].ship!;
+	let total = 0;
+	for (const u of used) {
+		const o = ship.outfits.find((x) => x.uid === u.uid)!;
+		const def = OUTFITS_BY_ID[o.outfitId];
+		const penalty = outfitPenalty(ship, o);
+		for (let i = 0; i < u.spaces.length; i++) {
+			const roll = rollDie(G, seat, random, DIE_SIDES[def.die!], `${side}: ${def.name}`);
+			G.rolls!.at(-1)!.viewers = [viewer];
+			const value = Math.max(1, roll - penalty);
+			total += value;
+			settleRoll(G, 'neutral', `${value} ${side === 'Attack' ? 'attack' : 'blocked'}${penalty ? ` (−${penalty} damage on it)` : ''}`);
+		}
+	}
+	return total;
+}
+
+/**
+ * Steps 3-5 (rulebook p13): the defender's shields go up, the attacker rolls, then the
+ * defender, and whatever the shields don't stop is damage for the defender to place.
+ */
+function resolveAttack(c: MoveCtx, shields: Declared) {
+	const { G, random } = c;
+	const combat = G.combat!;
+	const { attacker, defender } = combat;
+	const ship = G.players[defender].ship!;
+	combat.shields = spendMarkers(ship, shields);
+	if (combat.shields.length) log(G, defender, `raised shields: ${describeOutfits(ship, combat.shields)}`);
+	const attack = rollOutfits(G, attacker, random, combat.weapons, 'Attack', defender);
+	const defence = rollOutfits(G, defender, random, combat.shields, 'Defence', attacker);
+	const damage = Math.max(0, attack - defence);
+	Object.assign(combat, { attack, defence, damage });
+	// The last die rolled tells the story, from its roller's side.
+	const last = G.rolls!.at(-1)!;
+	const summary = `Attack ${attack} − defence ${defence}: ${damage ? `${damage} damage` : 'no damage'}`;
+	const byDefender = last.seat === defender;
+	settleRoll(G, byDefender ? (damage ? 'bad' : 'good') : 'neutral', `${last.detail}. ${summary}`);
+	log(G, attacker, `rolled ${attack} attack against {@${defender}}, who blocked ${defence}: ${damage ? `${damage} damage` : 'no damage'}`);
+	if (damage && takeDamage(G, defender, 'damage', damage, `shot down by {@${attacker}}`)) {
+		G.combat = null;
+		return;
+	}
+	advanceCombat(G);
+}
+
+/** Next combat step for the defender: place damage, then re-arm shields, then it's over. */
+function advanceCombat(G: ZiaState) {
+	const combat = G.combat!;
+	const p = G.players[combat.defender];
+	if (p.pendingDamage.length) {
+		combat.stage = 'damage';
+		return;
+	}
+	if (rearmLimit(G) > 0) {
+		combat.stage = 'rearm';
+		return;
+	}
+	rearmShields(G, 0);
+}
+
+/** Markers spent on shields in this attack that the defender can afford to re-arm (1 energy each). */
+export function rearmLimit(G: ZiaState): number {
+	const combat = G.combat;
+	const ship = combat ? G.players[combat.defender].ship : null;
+	if (!combat || !ship) return 0;
+	return Math.min(ship.energy, combat.shields.reduce((n, s) => n + s.spaces.length, 0));
+}
+
+/**
+ * Step 6 (rulebook p13): re-arm `n` of the shield markers for 1 energy each; the rest go
+ * to Disarmed (markers knocked off by damage are already there). The attack is over.
+ */
+function rearmShields(G: ZiaState, n: number) {
+	const combat = G.combat!;
+	const ship = G.players[combat.defender].ship!;
+	let rearm = n;
+	for (const s of combat.shields) {
+		const o = ship.outfits.find((x) => x.uid === s.uid);
+		for (const space of s.spaces) {
+			if (!o?.usedSpaces.includes(space)) continue;
+			o.usedSpaces = o.usedSpaces.filter((u) => u !== space);
+			if (rearm > 0) {
+				ship.armedMarkers++;
+				rearm--;
+			} else ship.disarmedMarkers++;
+		}
+	}
+	// Re-arming one that damage already knocked to Disarmed.
+	const fromDisarmed = Math.min(rearm, ship.disarmedMarkers);
+	ship.disarmedMarkers -= fromDisarmed;
+	ship.armedMarkers += fromDisarmed;
+	ship.energy -= n;
+	if (n) log(G, combat.defender, `re-armed ${n} shield marker${n === 1 ? '' : 's'} (−${n} energy)`);
+	G.combat = null;
+}
+
+// ---------------------------------------------------------------------------
 // Validation (shared by the client for instant feedback and by the moves)
 // ---------------------------------------------------------------------------
 
 export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, moveName: string, args: unknown[]): true | string {
-	if (playerID !== currentPlayer) return 'Not your turn';
+	if (playerID !== actingSeat(G, currentPlayer)) return G.combat && playerID === currentPlayer ? 'Waiting for the defender' : 'Not your turn';
 	const p = G.players[playerID];
 	if (!p) return 'Unknown captain';
+	// Under attack: the defender only answers the attack.
+	if (G.combat) {
+		const stage = G.combat.stage;
+		if (moveName === 'defend' && stage === 'defend') return checkDeclared(args[0], p.ship ? shieldOptions(p.ship) : [], p.ship?.armedMarkers ?? 0, 'shield');
+		if (moveName === 'placeDamage' && stage === 'damage') {
+			if (!p.ship || !p.pendingDamage?.length) return 'No damage to place';
+			return damageTargets(p.ship).includes(args[0] as string) ? true : 'That space already has damage';
+		}
+		if (moveName === 'rearmShields' && stage === 'rearm') {
+			const n = args[0];
+			return Number.isInteger(n) && (n as number) >= 0 && (n as number) <= rearmLimit(G) ? true : `Re-arm up to ${rearmLimit(G)}`;
+		}
+		return stage === 'defend' ? 'First choose your shields' : stage === 'damage' ? 'First place your damage' : 'First choose which shield markers to re-arm';
+	}
 	// Mission cards drawn at the end of the turn: choose which to keep before anything else.
 	if (p.drawnMissions?.length && moveName !== 'chooseMissions') return 'Choose which mission cards to keep first';
 	// Docked at a starport: the Action Phase is over.
@@ -1031,6 +1247,17 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 			return cargoTargets(p.ship).includes(to) ? true : "A cube can't go there";
 		}
 
+		case 'attack': {
+			if (G.stage !== 'play' || !p.ship || !p.position) return 'Not during setup';
+			const target = G.players[args[0] as string];
+			if (!target || target.id === playerID || !target.ship || !target.position) return 'Pick a ship on the board';
+			if (p.ship.armedMarkers <= 0) return 'No armed markers';
+			const t = attackTargets(G, playerID).find((x) => x.seat === target.id);
+			if (!t) return 'That ship is out of range or out of sight';
+			if (!Array.isArray(args[1]) || !args[1].length) return 'Choose weapons to fire';
+			return checkDeclared(args[1], t.weapons, p.ship.armedMarkers, 'weapon');
+		}
+
 		case 'claimExplorationPair':
 			if (!G.turn.explorationPairPending) return 'No exploration tokens to cash in';
 			return args[0] === 'fame' || args[0] === 'credits' ? true : 'Choose fame or credits';
@@ -1052,12 +1279,26 @@ export function checkMove(G: ZiaState, playerID: string, currentPlayer: string, 
 const RESOLVING_MOVES = new Set(['placeDamage', 'placeCargo', 'jettisonCargo', 'claimExplorationPair']);
 
 /** Action Phase moves, not allowed once docked at a starport. */
-const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'extract', 'crossBorder', 'stopMove', 'useGate']);
+const ACTION_MOVES = new Set(['useImpulse', 'fireEngine', 'moveShip', 'blindJump', 'scanSector', 'buyCargo', 'sellCargo', 'extract', 'crossBorder', 'stopMove', 'useGate', 'attack']);
 
 /** Moves for a move paused at a border. */
 const CROSSING_MOVES = new Set(['crossBorder', 'stopMove', 'useShield', 'acceptBorderEffect']);
 
-type MoveCtx = { G: ZiaState; ctx: Ctx; playerID: string; events: { endTurn: () => void }; random: RandomApi };
+type MoveCtx = {
+	G: ZiaState;
+	ctx: Ctx;
+	playerID: string;
+	events: { endTurn: () => void; setActivePlayers?: (arg: { value: Record<string, string> }) => void };
+	random: RandomApi;
+};
+
+/** Stage the defender sits in while an attack waits on them (other captains can't move). */
+const DEFEND_STAGE = 'defend';
+
+/** Hand control back to the attacker once the attack is over. */
+function releaseDefender(c: MoveCtx) {
+	if (!c.G.combat) c.events.setActivePlayers?.({ value: {} });
+}
 
 function guarded(name: string, fn: (c: MoveCtx, ...args: never[]) => void) {
 	return (c: MoveCtx, ...args: unknown[]) => {
@@ -1217,11 +1458,46 @@ const moves = {
 	}),
 
 	/** Place one pending damage on a hold space or outfit section of the captain's choice. */
-	placeDamage: guarded('placeDamage', ({ G, playerID }, cell: string) => {
+	placeDamage: guarded('placeDamage', (c, cell: string) => {
+		const { G, playerID } = c;
 		const p = G.players[playerID];
 		const kind = p.pendingDamage.shift()!;
 		const cube = applyDamage(p.ship!, kind, cell);
 		log(G, playerID, `placed ${kind === 'ice' ? 'ice damage' : 'damage'} in their hold${cube ? ` (a ${cube} cube was jettisoned)` : ''}`);
+		// Under attack: once it's all placed, on to re-arming shields.
+		if (G.combat && !p.pendingDamage.length) {
+			advanceCombat(G);
+			releaseDefender(c);
+		}
+	}),
+
+	/**
+	 * Attack (standard action, rulebook p13): fire blasters (range 1) and/or missiles (range
+	 * 2-6) at a ship in line of sight, one armed marker per die. The defender then declares
+	 * shields; with none that can fire, the dice are rolled straight away.
+	 */
+	attack: guarded('attack', (c, target: string, weapons: Declared) => {
+		const { G, playerID, events } = c;
+		const ship = G.players[playerID].ship!;
+		endMovement(G, playerID);
+		const used = spendMarkers(ship, weapons);
+		G.combat = { attacker: playerID, defender: target, weapons: used, stage: 'defend', shields: [] };
+		log(G, playerID, `attacks {@${target}} with ${describeOutfits(ship, used)}`);
+		const defender = G.players[target].ship!;
+		if (defender.armedMarkers <= 0 || !shieldOptions(defender).length) resolveAttack(c, []);
+		if (G.combat) events.setActivePlayers?.({ value: { [target]: DEFEND_STAGE } });
+	}),
+
+	/** Under attack: declare shields (one armed marker per die, none is fine), then both sides roll. */
+	defend: guarded('defend', (c, shields: Declared) => {
+		resolveAttack(c, shields);
+		releaseDefender(c);
+	}),
+
+	/** After an attack: re-arm `n` of the markers spent on shields, 1 energy each. */
+	rearmShields: guarded('rearmShields', (c, n: number) => {
+		rearmShields(c.G, n);
+		releaseDefender(c);
 	}),
 
 	/** Put a gained cargo cube on an empty hold space or Cargo Pod section of the captain's choice. */
@@ -1559,8 +1835,11 @@ const ZiaGame: Game<ZiaState> = {
 		play: {
 			turn: {
 				order: TurnOrder.CUSTOM_FROM('turnOrder'),
+				// The defender acts here during the attacker's turn, with the usual moves (checkMove says which).
+				stages: { [DEFEND_STAGE]: {} },
 				onBegin: ({ G, ctx, random }) => {
 					G.turn = { movement: 0, explorationPairPending: false, crossing: null, hazard: null, missionDraws: [], starport: false };
+					G.combat = null;
 					const p = G.players[ctx.currentPlayer];
 					if (p?.ship && !p.position) respawnShip(G, p.id, random as unknown as RandomApi);
 				},

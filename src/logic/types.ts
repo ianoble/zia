@@ -166,6 +166,8 @@ export interface DiceRoll {
 	luck?: boolean;
 	/** Not rolled: the die was set to its maximum (Enviro-Shld). */
 	automatic?: boolean;
+	/** Other captains who see this roll too (the other ship in a fight). */
+	viewers?: string[];
 }
 
 /** Mine, Harvest and Salvage spaces (rulebook p16). */
@@ -197,6 +199,32 @@ export interface BorderCrossing {
 	roll?: number;
 	/** Damage (asteroid) or energy loss (nebula) still to take. */
 	amount?: number;
+}
+
+/** Markers one ship put on an outfit's use spaces for an attack or a defence: one die each. */
+export interface CombatOutfit {
+	uid: string;
+	/** Use-space indices the markers went on. */
+	spaces: number[];
+}
+
+/**
+ * An attack in progress (rulebook p13-14). The attacker has declared and spent markers;
+ * the defender now acts (it's still the attacker's turn):
+ * - 'defend': declare shields (or none); then both sides roll.
+ * - 'damage': place the damage that got through.
+ * - 'rearm': re-arm markers spent on shields for 1 energy each (or not).
+ */
+export interface CombatState {
+	attacker: string;
+	defender: string;
+	weapons: CombatOutfit[];
+	stage: 'defend' | 'damage' | 'rearm';
+	shields: CombatOutfit[];
+	/** Attack Value, Defense Value and the damage that got through, once rolled. */
+	attack?: number;
+	defence?: number;
+	damage?: number;
 }
 
 export interface ZiaState extends BaseGameState {
@@ -238,6 +266,8 @@ export interface ZiaState extends BaseGameState {
 	rolls?: DiceRoll[];
 	/** Rolls made so far this game: each roll's `id`. */
 	rollCount?: number;
+	/** An attack waiting on the defender (see CombatState). */
+	combat?: CombatState | null;
 }
 
 export interface ZiaGameOver {
