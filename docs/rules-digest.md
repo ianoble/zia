@@ -124,6 +124,7 @@ All of these roll a d20.
 - **Nebula:** 1–10 lose energy equal to the roll (shields help); if energy runs out, disarm markers; if both run out, the ship is stranded and movement ends. 11–20 safe.
 - **Star:** the ship is destroyed.
 - **Line of sight:** blocked by planetary shields, asteroids, ice asteroids, debris, stars and unexplored space.
+  - Implemented in `logic/sight.ts`: a straight line between space centres. A ship in an asteroid or debris space can't see or be seen (each space has its own border); ships inside the same planet see each other. A line exactly along an edge or through a corner is clear if either side is clear (our call; the rulebook doesn't say). Ice asteroids aren't tagged on tiles yet. Try it at `/dev/board?sight=1`.
 - **Adjacency:** blocked by planetary shields.
 - **Double traversal:** one move that crosses two borders resolves each in order.
 - **Gates:** spend 1 movement point to move from any gate space to any other gate. The Tigris gate instead sends you to a random spawn point (d20).

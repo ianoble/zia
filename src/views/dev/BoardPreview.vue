@@ -5,6 +5,7 @@ import { explorePlacement, slotCrossed, startingBoard, type BoardState } from '.
 import { boardHexes, startingDeck } from '../../logic/board';
 import { SECTOR_TILES } from '../../data/sectors';
 import { HEX_DIRECTIONS, hexKey } from '../../logic/hex';
+import { visibleHexes } from '../../logic/sight';
 
 const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
 
@@ -12,6 +13,8 @@ const SLOT_NAMES = ['E', 'SE', 'SW', 'W', 'NW', 'NE'];
  * Design sandbox for the board — no server needed. Route: /dev/board
  * Click a hex on the outer rim of a sector to explore through that side: a blank tile
  * is placed against it, turned so the edge symbols match.
+ * In Line of sight mode, clicking a hex shows every space it can see (up to missile
+ * range, 6), numbered by range.
  */
 
 const query = new URLSearchParams(window.location.search);
@@ -34,6 +37,13 @@ function galleryBoard(): BoardState {
 }
 const board = ref<BoardState>(gallery ? galleryBoard() : freshBoard());
 const note = ref('');
+// ?sight=1 starts in Line of sight mode.
+const sightMode = ref(query.get('sight') === '1');
+const sightFrom = ref<string | null>(null);
+const sight = computed(() => (sightMode.value && sightFrom.value ? visibleHexes(board.value, sightFrom.value, 6) : null));
+const sightShips = computed(() =>
+	sightMode.value && sightFrom.value ? [{ seat: 'sight', position: sightFrom.value, color: '#f59e0b', label: 'A', active: true }] : [],
+);
 
 /** Every exploration space shows a face-down token in the preview. */
 const tokens = computed(() => [...boardHexes(board.value).values()].filter((h) => h.kind === 'exploration').map((h) => h.key));
@@ -54,6 +64,11 @@ function reset() {
 }
 
 function onHexClick(key: string) {
+	if (sightMode.value) {
+		sightFrom.value = sightFrom.value === key ? null : key;
+		note.value = sightFrom.value ? `Line of sight from ${key}: ${sight.value?.size ?? 0} spaces within range 6.` : '';
+		return;
+	}
 	// Explore through the first open side this hex touches (rim hexes only).
 	const [q, r] = key.split(',').map(Number);
 	for (const d of HEX_DIRECTIONS) {
@@ -91,11 +106,15 @@ function exploreFrom(sectorIndex: number, slot: number, tileId?: string): boolea
 				</select>
 			</label>
 			<button type="button" class="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700" @click="reset">Reset</button>
+			<label class="text-sm">
+				<input v-model="sightMode" type="checkbox" class="mr-1" @change="sightFrom = null" />
+				Line of sight
+			</label>
 			<span class="text-sm text-slate-400">{{ note }}</span>
 			<router-link to="/" class="ml-auto text-sm text-slate-500 hover:text-slate-300">← Lobby</router-link>
 		</header>
 		<div class="min-h-0 flex-1 p-4 pt-0">
-			<BoardMap :board="board" :ships="[]" :exploration-spaces="tokens" @hex-click="onHexClick" />
+			<BoardMap :board="board" :ships="sightShips" :exploration-spaces="tokens" :reachable="sight" @hex-click="onHexClick" />
 		</div>
 	</div>
 </template>
